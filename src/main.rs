@@ -116,6 +116,12 @@ fn main() -> ExitCode {
 async fn run(start: Request, search: String) -> io::Result<()> {
     let client = net::client().map_err(io::Error::other)?;
     let (tx, mut rx) = mpsc::unbounded_channel();
+    // ratatui's hook (installed by `init`) restores the screen, then runs this one.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        previous(info);
+    }));
     let mut terminal = ratatui::init();
     crossterm::execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
 
