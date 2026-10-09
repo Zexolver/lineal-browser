@@ -284,7 +284,12 @@ impl<'a> Builder<'a> {
                     break;
                 }
             }
-            self.lines.push(Line { spans: std::mem::take(&mut self.cur) });
+            let line = Line { spans: std::mem::take(&mut self.cur) };
+            // Spacer elements (`<td>&nbsp;</td>`, `<br><br><br>`) shouldn't stack up blank lines.
+            let redundant = self.pre == 0 && line.is_blank() && self.lines.last().is_none_or(Line::is_blank);
+            if !redundant {
+                self.lines.push(line);
+            }
             self.started = false;
             self.cur_w = 0;
             self.content = false;
@@ -594,6 +599,13 @@ impl<'a> Builder<'a> {
         self.indented(node, &marker, &rest, 0);
     }
 
+    /// Back-to-back links or fields are separated by CSS margins on real pages; keep them apart.
+    fn separate_from_previous_target(&mut self) {
+        if self.content && self.cur.last().is_some_and(|s| s.target.is_some()) {
+            self.space = true;
+        }
+    }
+
     fn add_target(&mut self, t: Target) -> usize {
         self.targets.push(t);
         self.targets.len() - 1
@@ -625,25 +637,14 @@ impl<'a> Builder<'a> {
             self.ctx.base.join(href).ok()
         };
         let Some(url) = url else { return self.children(node) };
+        self.separate_from_previous_target();
         let idx = self.add_target(Target::Link(url.clone()));
         let saved = (self.style, self.target);
         (self.style, self.target) = (saved.0 | LINK, Some(idx));
         let before = self.emitted;
         self.children(node);
         if self.emitted == before {
-            // Icon-only link: fall back to its accessible name or a piece of the URL.
-            let label = e
-                .attr("aria-label")
-                .or(e.attr("title"))
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    url.path_segments()
-                        .and_then(|s| s.filter(|s| !s.is_empty()).next_back().map(str::to_string))
-                        .or(url.host_str().map(str::to_string))
-                        .unwrap_or_else(|| "link".into())
-                });
-            self.text(&format!("[{label}]"));
+            self.text(&fallback_label(e, &url));
         }
         (self.style, self.target) = saved;
         self.link_number(idx);
@@ -667,6 +668,7 @@ impl<'a> Builder<'a> {
             return;
         }
         let label = self.ctx.forms.display(fi);
+        self.separate_from_previous_target();
         let idx = self.add_target(Target::Field(fi));
         let saved = (self.style, self.target);
         (self.style, self.target) = (FIELD, Some(idx));
@@ -929,6 +931,23 @@ impl<'a> Builder<'a> {
                             m.2 += 2;
                             self.measure_into(child, m);
                         }
+                        "a" => {
+                            // Room for the space between back-to-back links, and the `[n]` of `--dump`.
+                            m.2 += if self.ctx.number_links { 5 } else { 1 };
+                            let mut inner = (0, 0, 0);
+                            self.measure_into(child, &mut inner);
+                            let url = e.attr("href").and_then(|h| self.ctx.base.join(h.trim()).ok());
+                            if inner.1.max(inner.2) == 0
+                                && let Some(url) = url
+                            {
+                                // Renders as its fallback label (see `link`).
+                                let w = fallback_label(e, &url).width();
+                                inner = (w.min(30), w, w);
+                            }
+                            m.0 = m.0.max(inner.0);
+                            m.1 = m.1.max(inner.1).max(m.2 + inner.1);
+                            m.2 += inner.2;
+                        }
                         "li" => {
                             m.2 += 2;
                             self.measure_into(child, m);
@@ -944,6 +963,22 @@ impl<'a> Builder<'a> {
             }
         }
     }
+}
+
+/// What an icon-only link shows: its accessible name, or a piece of its URL.
+fn fallback_label(e: &Element, url: &Url) -> String {
+    let label = e
+        .attr("aria-label")
+        .or(e.attr("title"))
+        .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            url.path_segments()
+                .and_then(|s| s.filter(|s| !s.is_empty()).next_back().map(str::to_string))
+                .or(url.host_str().map(str::to_string))
+                .unwrap_or_else(|| "link".into())
+        });
+    format!("[{label}]")
 }
 
 fn bordered(e: &Element) -> bool {
@@ -1016,8 +1051,16 @@ mod tests {
     }
 
     #[test]
+    fn blank_lines_collapse() {
+        let (t, _) = render("<p>a<br><br><br><br>b</p><table><tr><td>&nbsp;<td>&nbsp;</table><p>c</p><pre>x\n\n\ny</pre>", 80);
+        assert_eq!(t, "a\n\nb\n\nc\n\nx\n\n\ny\n");
+    }
+
+    #[test]
     fn icon_links_get_labels() {
         let (t, _) = render(r#"<a href="/feed.xml"><img src=x></a> <a href="/" aria-label="Home"></a>"#, 80);
         assert_eq!(t, "[feed.xml] [Home]\n");
+        let (t, _) = render(r#"<a href="/a">a</a><a href="/b">b</a><input type=checkbox><input type=submit>"#, 80);
+        assert_eq!(t, "a b [ ] [ Submit ]\n");
     }
 }
