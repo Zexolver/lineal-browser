@@ -883,12 +883,16 @@ impl<'a> Builder<'a> {
         for child in node.children() {
             match child.value() {
                 Node::Text(t) => {
-                    let mut first = true;
+                    let mut space = t.starts_with(|c: char| c.is_whitespace() && c != '\u{a0}');
                     for word in t.split(|c: char| c.is_whitespace() && c != '\u{a0}') {
-                        if !first && m.2 > 0 {
+                        if word.is_empty() {
+                            space = true;
+                            continue;
+                        }
+                        if space && m.2 > 0 {
                             m.2 += 1;
                         }
-                        first = false;
+                        space = false;
                         let w = word.width();
                         m.0 = m.0.max(w);
                         m.2 += w;
@@ -964,7 +968,7 @@ mod tests {
     use crate::dom::Dom;
 
     fn render(html: &str, width: usize) -> (String, Layout) {
-        let dom = Dom::parse(html, &Url::parse("https://example.org/").unwrap());
+        let dom = Dom::parse(html, &Url::parse("https://example.org/").unwrap(), &[]);
         let l = dom.layout(width, false);
         (l.plain_text(), l)
     }

@@ -47,7 +47,7 @@ pub struct Page {
 
 impl Page {
     fn new(req: Request, doc: Rc<Document>, source: bool, width: usize) -> Page {
-        let content = if doc.is_html() && !source { Content::Html(Dom::parse(&doc.text, &doc.url)) } else { Content::Text };
+        let content = if doc.is_html() && !source { Content::Html(Dom::parse(&doc.text, &doc.url, &doc.hidden)) } else { Content::Text };
         let title = match &content {
             Content::Html(d) if !d.title.is_empty() => d.title.clone(),
             _ => doc.url.to_string(),
@@ -148,6 +148,7 @@ impl App {
             mime: "text/html".into(),
             text: String::new(),
             status: 200,
+            hidden: Vec::new(),
         });
         App {
             client,
@@ -252,7 +253,7 @@ impl App {
                     }
                     Err(e) => {
                         let text = pages::error(req.url.as_str(), &e);
-                        let doc = Document { url: req.url.clone(), mime: "text/html".into(), text, status: 0 };
+                        let doc = Document { url: req.url.clone(), mime: "text/html".into(), text, status: 0, hidden: Vec::new() };
                         self.show(req, Rc::new(doc), push, None, false);
                     }
                 }

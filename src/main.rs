@@ -1,6 +1,7 @@
 //! Lineal: a lightweight terminal web browser.
 
 mod app;
+mod css;
 mod dom;
 mod editor;
 mod forms;
@@ -169,7 +170,7 @@ async fn dump(mut req: Request, search: &str, width: Option<usize>, source: bool
     }
     let width = width.or_else(|| crossterm::terminal::size().ok().map(|(w, _)| w as usize)).unwrap_or(80);
     let text = if doc.is_html() {
-        let dom = dom::Dom::parse(&doc.text, &doc.url);
+        let dom = dom::Dom::parse(&doc.text, &doc.url, &doc.hidden);
         let layout = dom.layout(width, true);
         let mut text = layout.plain_text();
         let links: Vec<String> = layout

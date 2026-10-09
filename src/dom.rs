@@ -9,13 +9,14 @@ use html5ever::tree_builder::TreeBuilderOpts;
 use scraper::{Html, HtmlTreeSink, Node, Selector};
 use url::Url;
 
+use crate::css;
 use crate::forms::Forms;
 use crate::layout::{self, Ctx, Layout};
 
 /// Class names that sites use for "visually hidden, screen readers only" text.
 const SR_ONLY: &[&str] = &["sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "screenreader-only", "a11y-hidden", "hidden"];
 
-/// Stop matching CSS rules after this many selectors, so a huge inline sheet can't stall us.
+/// Stop matching CSS rules after this many selectors, so a huge stylesheet can't stall us.
 const MAX_SELECTORS: usize = 3000;
 
 pub struct Dom {
@@ -30,7 +31,8 @@ pub struct Dom {
 }
 
 impl Dom {
-    pub fn parse(source: &str, url: &Url) -> Dom {
+    /// `external` holds hiding selectors from the page's external stylesheets (see `css.rs`).
+    pub fn parse(source: &str, url: &Url, external: &[String]) -> Dom {
         // Scripting is off: we don't run JS, so `<noscript>` content must be parsed as real markup.
         let opts = ParseOpts {
             tree_builder: TreeBuilderOpts { scripting_enabled: false, ..Default::default() },
@@ -57,8 +59,7 @@ impl Dom {
                     refresh = e.attr("content").and_then(|c| parse_refresh(c, url));
                 }
                 "style" => {
-                    let media = e.attr("media").unwrap_or("all").to_ascii_lowercase();
-                    if media.contains("all") || media.contains("screen") {
+                    if e.attr("media").is_none_or(css::media_matches) {
                         sheets.push(text_of(node));
                     }
                 }
@@ -66,13 +67,23 @@ impl Dom {
             }
         }
 
-        let mut hidden = HashSet::new();
-        let mut selectors: Vec<String> = SR_ONLY.iter().map(|c| format!(".{c}")).collect();
-        for sheet in &sheets {
-            selectors.extend(display_none_selectors(sheet));
+        let mut classes = HashSet::new();
+        let mut ids = HashSet::new();
+        for node in html.tree.root().descendants() {
+            if let Some(e) = node.value().as_element() {
+                classes.extend(e.classes().map(str::to_string));
+                ids.extend(e.id().map(str::to_string));
+            }
         }
-        for sel in selectors.iter().take(MAX_SELECTORS) {
-            if let Ok(sel) = Selector::parse(sel) {
+        let mut hidden = HashSet::new();
+        let selectors = SR_ONLY
+            .iter()
+            .map(|c| format!(".{c}"))
+            .chain(sheets.iter().flat_map(|s| css::hiding_selectors(s)))
+            .chain(external.iter().cloned())
+            .filter(|s| css::could_match(s, &classes, &ids));
+        for sel in selectors.take(MAX_SELECTORS) {
+            if let Ok(sel) = Selector::parse(&sel) {
                 hidden.extend(html.select(&sel).map(|e| e.id()));
             }
         }
@@ -110,66 +121,9 @@ fn parse_refresh(content: &str, base: &Url) -> Option<(u64, Url)> {
     Some((delay, base.join(target).ok()?))
 }
 
-/// Selectors of top-level rules in `css` that declare `display: none`.
-///
-/// Rules inside at-rules (`@media` etc.) are skipped: whether they apply depends on a viewport we don't have.
-pub fn display_none_selectors(css: &str) -> Vec<String> {
-    let css = strip_comments(css);
-    let mut out = Vec::new();
-    let mut rest = css.as_str();
-    while let Some(open) = rest.find('{') {
-        let prelude = rest[..open].trim();
-        // Find the matching close brace.
-        let mut depth = 0;
-        let mut close = None;
-        for (i, c) in rest[open..].char_indices() {
-            match c {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = Some(open + i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let close = close.unwrap_or(rest.len());
-        let body = &rest[(open + 1).min(close)..close];
-        // A prelude may start with leftovers of a `@import ...;` statement.
-        let prelude = prelude.rsplit(';').next().unwrap_or("").trim();
-        if !prelude.starts_with('@') {
-            let decls: String = body.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
-            if decls.split(';').any(|d| d == "display:none" || d == "display:none!important") {
-                out.push(prelude.to_string());
-            }
-        }
-        rest = &rest[(close + 1).min(rest.len())..];
-    }
-    out
-}
-
-fn strip_comments(css: &str) -> String {
-    let mut out = String::with_capacity(css.len());
-    let mut rest = css;
-    while let Some(start) = rest.find("/*") {
-        out.push_str(&rest[..start]);
-        rest = rest[start + 2..].find("*/").map_or("", |end| &rest[start + 2 + end + 2..]);
-    }
-    out.push_str(rest);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn css_display_none() {
-        let css = "/* x { display:none } */ .a, .b { color: red; display : none } @media (max-width: 9px) { .c { display:none } } .d{display:block} .e{display:none!important}";
-        assert_eq!(display_none_selectors(css), vec![".a, .b", ".e"]);
-    }
 
     #[test]
     fn page_metadata() {
@@ -179,6 +133,7 @@ mod tests {
             World </title><base href="/root/"><meta http-equiv="Refresh" content="0; URL='next.html'">
             <style>.gone{display:none}</style><p class=gone>x</p><noscript><p>no js</p></noscript>"#,
             &url,
+            &[],
         );
         assert_eq!(dom.title, "Hello World");
         assert_eq!(dom.base.as_str(), "https://example.org/root/");
