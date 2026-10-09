@@ -184,6 +184,10 @@ struct Builder<'a> {
     targets: Vec<Target>,
     anchors: HashMap<String, usize>,
     pending_anchors: Vec<String>,
+    /// Where the current unbreakable run of text starts: (span count, byte offset in the last span, width before).
+    run_start: Option<(usize, usize, usize)>,
+    /// Width of the current line's prefix.
+    line_start_w: usize,
     /// Counts emitted content, to detect empty links.
     emitted: usize,
     table_depth: usize,
@@ -209,6 +213,8 @@ impl<'a> Builder<'a> {
             targets: Vec::new(),
             anchors: HashMap::new(),
             pending_anchors: Vec::new(),
+            run_start: None,
+            line_start_w: 0,
             emitted: 0,
             table_depth: 0,
         }
@@ -269,6 +275,8 @@ impl<'a> Builder<'a> {
             }
         }
         self.cur_w = w;
+        self.line_start_w = w;
+        self.run_start = None;
         self.started = true;
         self.content = false;
     }
@@ -325,8 +333,15 @@ impl<'a> Builder<'a> {
     fn word(&mut self, word: &str) {
         let w = word.width();
         let space = self.space && self.content;
+        // Glued to the previous word (e.g. a link followed by "."): not a break opportunity.
+        let glued = self.started && self.content && !self.space;
         if self.started && self.content && self.cur_w + space as usize + w > self.width {
+            let tail = if glued { self.take_run() } else { Vec::new() };
             self.finish_line();
+            self.start_line();
+            for t in tail {
+                self.push(&t.text, t.style, t.target);
+            }
         }
         self.start_line();
         if self.space && self.content {
@@ -338,6 +353,9 @@ impl<'a> Builder<'a> {
                 }
                 _ => self.push(" ", 0, None),
             }
+        }
+        if !glued || !self.content {
+            self.run_start = Some((self.cur.len(), self.cur.last().map_or(0, |s| s.text.len()), self.cur_w));
         }
         self.space = false;
         if self.cur_w + w <= self.width {
@@ -357,6 +375,25 @@ impl<'a> Builder<'a> {
             chunk.push(c);
         }
         self.push(&chunk, self.style, self.target);
+    }
+
+    /// Removes the current unbreakable run from the line so it can move to the next one.
+    /// Returns nothing if the run is all the line has (it would just overflow again).
+    fn take_run(&mut self) -> Vec<Span> {
+        let Some((n, off, w_before)) = self.run_start else { return Vec::new() };
+        if w_before <= self.line_start_w || n == 0 || n > self.cur.len() {
+            return Vec::new();
+        }
+        let mut tail = Vec::new();
+        if n > 0 {
+            let s = &mut self.cur[n - 1];
+            if off < s.text.len() {
+                tail.push(Span { text: s.text.split_off(off), style: s.style, target: s.target });
+            }
+        }
+        tail.extend(self.cur.drain(n..));
+        self.cur_w = w_before;
+        tail
     }
 
     fn text(&mut self, text: &str) {
@@ -1048,6 +1085,14 @@ mod tests {
         let (t, l) = render(r#"<p>a</p><div hidden>x</div><p style="display: none">y</p><h2 id="s">S</h2>"#, 80);
         assert_eq!(t, "a\n\nS\n");
         assert_eq!(l.anchors.get("s"), Some(&2));
+    }
+
+    #[test]
+    fn punctuation_stays_with_links() {
+        let (t, _) = render(r#"<p>aaaa bbbb <a href="/x">cc</a>.</p>"#, 12);
+        assert_eq!(t, "aaaa bbbb\ncc.\n");
+        let (t, _) = render(r#"<p><a href="/x">abcdefghij</a>klm</p>"#, 10);
+        assert_eq!(t, "abcdefghij\nklm\n");
     }
 
     #[test]
