@@ -91,7 +91,13 @@ pub fn about(url: &url::Url, search: &str) -> About {
         "blank" => String::new(),
         other => error(url.as_str(), &format!("unknown page about:{other}")),
     };
-    About::Page(crate::net::Document { url: url.clone(), mime: "text/html".into(), text, status: 200, hidden: Vec::new() })
+    About::Page(crate::net::Document {
+        url: url.clone(),
+        mime: "text/html".into(),
+        text,
+        status: 200,
+        hidden: Vec::new(),
+    })
 }
 
 pub const DEFAULT_SEARCH: &str = "https://lite.duckduckgo.com/lite/?q=%s";

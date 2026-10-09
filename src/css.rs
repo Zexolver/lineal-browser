@@ -27,9 +27,8 @@ fn collect(css: &str, out: &mut Vec<String>) {
         let close = matching_brace(rest, open);
         let body = &rest[(open + 1).min(close)..close];
         if let Some(at) = prelude.strip_prefix('@') {
-            let (name, query) = at.split_once(|c: char| c.is_whitespace() || c == '(').map_or((at, ""), |(n, _)| {
-                (n, &at[n.len()..])
-            });
+            let (name, query) =
+                at.split_once(|c: char| c.is_whitespace() || c == '(').map_or((at, ""), |(n, _)| (n, &at[n.len()..]));
             match name.to_ascii_lowercase().as_str() {
                 "media" if media_matches(query) => collect(body, out),
                 "supports" | "layer" | "scope" | "document" => collect(body, out),
@@ -157,7 +156,8 @@ pub fn could_match(selector: &str, classes: &HashSet<String>, ids: &HashSet<Stri
             if c != '.' && c != '#' {
                 continue;
             }
-            let name: String = last[i + 1..].chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
+            let name: String =
+                last[i + 1..].chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
             if name.is_empty() {
                 continue;
             }
@@ -212,7 +212,8 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     while let Some(i) = lower[from..].find(name) {
         let at = from + i;
         from = at + name.len();
-        let before_ok = at > 0 && (bytes[at - 1].is_ascii_whitespace() || bytes[at - 1] == b'"' || bytes[at - 1] == b'\'');
+        let before_ok =
+            at > 0 && (bytes[at - 1].is_ascii_whitespace() || bytes[at - 1] == b'"' || bytes[at - 1] == b'\'');
         let rest = lower[from..].trim_start();
         if !before_ok {
             continue;

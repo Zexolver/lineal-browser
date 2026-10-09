@@ -114,13 +114,43 @@ const SKIPPED: &[&str] = &[
 ];
 
 const BLOCKS: &[&str] = &[
-    "html", "body", "div", "section", "article", "main", "nav", "header", "footer", "aside", "center", "hgroup",
-    "search", "caption", "figcaption", "legend", "form", "fieldset", "details", "dialog", "tr", "td", "th", "tbody",
-    "thead", "tfoot", "option", "optgroup", "frameset", "noscript", "address", "picture",
+    "html",
+    "body",
+    "div",
+    "section",
+    "article",
+    "main",
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "center",
+    "hgroup",
+    "search",
+    "caption",
+    "figcaption",
+    "legend",
+    "form",
+    "fieldset",
+    "details",
+    "dialog",
+    "tr",
+    "td",
+    "th",
+    "tbody",
+    "thead",
+    "tfoot",
+    "option",
+    "optgroup",
+    "frameset",
+    "noscript",
+    "address",
+    "picture",
 ];
 
 /// Blocks with a blank line before and after.
-const SPACED: &[&str] = &["p", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "listing", "xmp", "plaintext", "blockquote"];
+const SPACED: &[&str] =
+    &["p", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "listing", "xmp", "plaintext", "blockquote"];
 
 const BULLETS: &[&str] = &["• ", "◦ ", "▪ "];
 
@@ -847,7 +877,8 @@ impl<'a> Builder<'a> {
                 cells.push(self.render_cell(cell, w.max(1), if is_th { BOLD } else { 0 }));
             }
             // Pad short rows so separators line up.
-            let used: usize = cells.iter().map(|c| c.width).sum::<usize>() + sep.width() * cells.len().saturating_sub(1);
+            let used: usize =
+                cells.iter().map(|c| c.width).sum::<usize>() + sep.width() * cells.len().saturating_sub(1);
             let total: usize = widths.iter().sum::<usize>() + sep.width() * (k - 1);
             if used < total && !cells.is_empty() {
                 cells.last_mut().unwrap().width += total - used;
@@ -907,7 +938,11 @@ impl<'a> Builder<'a> {
         while lines.last().is_some_and(Line::is_blank) {
             lines.pop();
         }
-        let anchors = sub.anchors.into_iter().map(|(k, v)| (k, v.saturating_sub(lead).min(lines.len().saturating_sub(1)))).collect();
+        let anchors = sub
+            .anchors
+            .into_iter()
+            .map(|(k, v)| (k, v.saturating_sub(lead).min(lines.len().saturating_sub(1))))
+            .collect();
         Cell { width, lines, anchors }
     }
 
@@ -1011,7 +1046,7 @@ fn fallback_label(e: &Element, url: &Url) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             url.path_segments()
-                .and_then(|s| s.filter(|s| !s.is_empty()).next_back().map(str::to_string))
+                .and_then(|mut s| s.rfind(|s| !s.is_empty()).map(str::to_string))
                 .or(url.host_str().map(str::to_string))
                 .unwrap_or_else(|| "link".into())
         });
@@ -1097,7 +1132,8 @@ mod tests {
 
     #[test]
     fn blank_lines_collapse() {
-        let (t, _) = render("<p>a<br><br><br><br>b</p><table><tr><td>&nbsp;<td>&nbsp;</table><p>c</p><pre>x\n\n\ny</pre>", 80);
+        let (t, _) =
+            render("<p>a<br><br><br><br>b</p><table><tr><td>&nbsp;<td>&nbsp;</table><p>c</p><pre>x\n\n\ny</pre>", 80);
         assert_eq!(t, "a\n\nb\n\nc\n\nx\n\n\ny\n");
     }
 

@@ -22,11 +22,23 @@ const CACHED_ENTRIES: usize = 15;
 const MAX_REFRESHES: u32 = 5;
 const HINT_KEYS: &str = "asdfghjklqwertyuiopzxcvbnm";
 
+// Few of these exist at a time; boxing would only add noise.
+#[allow(clippy::large_enum_variant)]
 pub enum Msg {
-    Loaded { generation: u64, req: Request, push: bool, restore: Option<(usize, Option<usize>)>, result: Result<Outcome, String> },
-    Refresh { generation: u64, url: Url },
+    Loaded {
+        generation: u64,
+        req: Request,
+        push: bool,
+        restore: Option<(usize, Option<usize>)>,
+        result: Result<Outcome, String>,
+    },
+    Refresh {
+        generation: u64,
+        url: Url,
+    },
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Content {
     Html(Dom),
     Text,
@@ -47,12 +59,17 @@ pub struct Page {
 
 impl Page {
     fn new(req: Request, doc: Rc<Document>, source: bool, width: usize) -> Page {
-        let content = if doc.is_html() && !source { Content::Html(Dom::parse(&doc.text, &doc.url, &doc.hidden)) } else { Content::Text };
+        let content = if doc.is_html() && !source {
+            Content::Html(Dom::parse(&doc.text, &doc.url, &doc.hidden))
+        } else {
+            Content::Text
+        };
         let title = match &content {
             Content::Html(d) if !d.title.is_empty() => d.title.clone(),
             _ => doc.url.to_string(),
         };
-        let mut page = Page { req, doc, title, content, layout: Layout::default(), width, scroll: 0, focus: None, source };
+        let mut page =
+            Page { req, doc, title, content, layout: Layout::default(), width, scroll: 0, focus: None, source };
         page.layout = page.compute_layout();
         page
     }
@@ -253,7 +270,13 @@ impl App {
                     }
                     Err(e) => {
                         let text = pages::error(req.url.as_str(), &e);
-                        let doc = Document { url: req.url.clone(), mime: "text/html".into(), text, status: 0, hidden: Vec::new() };
+                        let doc = Document {
+                            url: req.url.clone(),
+                            mime: "text/html".into(),
+                            text,
+                            status: 0,
+                            hidden: Vec::new(),
+                        };
                         self.show(req, Rc::new(doc), push, None, false);
                     }
                 }
@@ -266,7 +289,14 @@ impl App {
         }
     }
 
-    fn show(&mut self, req: Request, doc: Rc<Document>, push: bool, restore: Option<(usize, Option<usize>)>, cache: bool) {
+    fn show(
+        &mut self,
+        req: Request,
+        doc: Rc<Document>,
+        push: bool,
+        restore: Option<(usize, Option<usize>)>,
+        cache: bool,
+    ) {
         let cached = cache.then(|| doc.clone());
         if push || self.history.is_empty() {
             self.save_position();
@@ -424,7 +454,11 @@ impl App {
         let shown = |t: &usize| lines[*t] != usize::MAX;
         let next = match self.page.focus {
             Some(f) if f < lines.len() && self.visible(lines[f]) => {
-                if forward { (f + 1..lines.len()).find(shown) } else { (0..f).rev().find(shown) }
+                if forward {
+                    (f + 1..lines.len()).find(shown)
+                } else {
+                    (0..f).rev().find(shown)
+                }
             }
             _ => {
                 let top = self.page.scroll;
@@ -520,7 +554,13 @@ impl App {
         match &self.page.content {
             Content::Html(dom) => {
                 let f = &dom.forms.fields[fi];
-                if !f.placeholder.is_empty() { f.placeholder.clone() } else if !f.name.is_empty() { f.name.clone() } else { "text".into() }
+                if !f.placeholder.is_empty() {
+                    f.placeholder.clone()
+                } else if !f.name.is_empty() {
+                    f.name.clone()
+                } else {
+                    "text".into()
+                }
             }
             Content::Text => String::new(),
         }
@@ -643,7 +683,8 @@ impl App {
             .into_iter()
             .enumerate()
             .map(|(i, (target, line, col))| {
-                let label = if two { format!("{}{}", keys[i / keys.len()], keys[i % keys.len()]) } else { keys[i].to_string() };
+                let label =
+                    if two { format!("{}{}", keys[i / keys.len()], keys[i % keys.len()]) } else { keys[i].to_string() };
                 Hint { label, target, line, col }
             })
             .collect();
@@ -861,7 +902,8 @@ pub fn resolve_input(input: &str, search: &str) -> Request {
 
 fn looks_like_host(s: &str) -> bool {
     let host = s.split(['/', '?', '#']).next().unwrap_or("");
-    let name = host.rsplit_once(':').map_or(host, |(h, p)| if p.chars().all(|c| c.is_ascii_digit()) { h } else { host });
+    let name =
+        host.rsplit_once(':').map_or(host, |(h, p)| if p.chars().all(|c| c.is_ascii_digit()) { h } else { host });
     name == "localhost"
         || name.parse::<std::net::IpAddr>().is_ok()
         || (name.contains('.')
@@ -873,7 +915,9 @@ fn looks_like_host(s: &str) -> bool {
 
 fn local_path(s: &str) -> Option<std::path::PathBuf> {
     let expanded = match s.strip_prefix("~/") {
-        Some(rest) => std::path::PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?).join(rest),
+        Some(rest) => {
+            std::path::PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?).join(rest)
+        }
         None => std::path::PathBuf::from(s),
     };
     let explicit = s.starts_with(['/', '.', '~', '\\']) || s.get(1..3) == Some(":\\");

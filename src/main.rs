@@ -14,7 +14,9 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use crossterm::event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream,
+};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
@@ -84,8 +86,10 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let search = std::env::var("LINEAL_SEARCH").ok().filter(|s| s.contains("%s")).unwrap_or(pages::DEFAULT_SEARCH.into());
-    let input = if args.input.is_empty() { std::env::var("LINEAL_HOME").unwrap_or_default() } else { args.input.clone() };
+    let search =
+        std::env::var("LINEAL_SEARCH").ok().filter(|s| s.contains("%s")).unwrap_or(pages::DEFAULT_SEARCH.into());
+    let input =
+        if args.input.is_empty() { std::env::var("LINEAL_HOME").unwrap_or_default() } else { args.input.clone() };
     let req = app::resolve_input(&input, &search);
 
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {

@@ -14,7 +14,15 @@ use crate::forms::Forms;
 use crate::layout::{self, Ctx, Layout};
 
 /// Class names that sites use for "visually hidden, screen readers only" text.
-const SR_ONLY: &[&str] = &["sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "screenreader-only", "a11y-hidden", "hidden"];
+const SR_ONLY: &[&str] = &[
+    "sr-only",
+    "visually-hidden",
+    "visuallyhidden",
+    "screen-reader-text",
+    "screenreader-only",
+    "a11y-hidden",
+    "hidden",
+];
 
 /// Stop matching CSS rules after this many selectors, so a huge stylesheet can't stall us.
 const MAX_SELECTORS: usize = 3000;

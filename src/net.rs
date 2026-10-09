@@ -10,11 +10,8 @@ use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_DISPOSITION, CONTENT_TYPE
 use tokio::io::AsyncWriteExt;
 use url::Url;
 
-pub const USER_AGENT: &str = concat!(
-    "Lineal/",
-    env!("CARGO_PKG_VERSION"),
-    " (terminal browser; +https://github.com/Zexolver/lineal-browser)"
-);
+pub const USER_AGENT: &str =
+    concat!("Lineal/", env!("CARGO_PKG_VERSION"), " (terminal browser; +https://github.com/Zexolver/lineal-browser)");
 
 /// External stylesheets: how many, how big and how long we wait for them.
 const MAX_SHEETS: usize = 8;
@@ -74,11 +71,9 @@ pub fn client() -> reqwest::Result<reqwest::Client> {
     // Pure-Rust-friendly crypto (ring) instead of aws-lc, which needs cmake and is painful to cross-compile.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mut headers = HeaderMap::new();
-    headers.insert(
-        ACCEPT,
-        HeaderValue::from_static("text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"),
-    );
-    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_str(&accept_language()).unwrap_or(HeaderValue::from_static("en")));
+    headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"));
+    headers
+        .insert(ACCEPT_LANGUAGE, HeaderValue::from_str(&accept_language()).unwrap_or(HeaderValue::from_static("en")));
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .default_headers(headers)
@@ -215,7 +210,13 @@ async fn fetch_file(url: &Url) -> Result<Outcome, String> {
         "html" | "htm" | "xhtml" => "text/html",
         _ => "text/plain",
     };
-    Ok(Outcome::Doc(Document { url: url.clone(), mime: mime.into(), text: decode(&bytes, None, mime == "text/html"), status: 200, hidden: Vec::new() }))
+    Ok(Outcome::Doc(Document {
+        url: url.clone(),
+        mime: mime.into(),
+        text: decode(&bytes, None, mime == "text/html"),
+        status: 200,
+        hidden: Vec::new(),
+    }))
 }
 
 async fn directory_listing(path: &Path) -> Result<String, String> {
@@ -231,7 +232,8 @@ async fn directory_listing(path: &Path) -> Result<String, String> {
     let mut html = format!("<title>{title}</title><h1>Index of {title}</h1><ul><li><a href=\"../\">../</a></li>");
     for (_, _, name, is_dir) in entries {
         let slash = if is_dir { "/" } else { "" };
-        let href: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect::<String>().replace('+', "%20");
+        let href: String =
+            url::form_urlencoded::byte_serialize(name.as_bytes()).collect::<String>().replace('+', "%20");
         html += &format!("<li><a href=\"{href}{slash}\">{}{slash}</a></li>", escape(&name));
     }
     Ok(html + "</ul>")
@@ -268,7 +270,10 @@ fn is_textual(mime: &str) -> bool {
         || mime.starts_with("text/")
         || mime.ends_with("+xml")
         || mime.ends_with("+json")
-        || matches!(mime, "application/xml" | "application/json" | "application/javascript" | "application/x-javascript")
+        || matches!(
+            mime,
+            "application/xml" | "application/json" | "application/javascript" | "application/x-javascript"
+        )
 }
 
 /// Decodes bytes using (in order) a BOM, the HTTP charset, a `<meta>` charset, then UTF-8.
@@ -294,24 +299,26 @@ fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
 }
 
 fn disposition_filename(value: &str) -> Option<String> {
-    value.split(';').find_map(|p| {
-        let (k, v) = p.split_once('=')?;
-        let k = k.trim().to_ascii_lowercase();
-        if k == "filename*" {
-            let v = v.trim().trim_matches('"');
-            let encoded = v.rsplit("''").next()?;
-            let bytes: Vec<u8> = url::form_urlencoded::parse(format!("x={encoded}").as_bytes())
-                .next()
-                .map(|(_, v)| v.into_owned().into_bytes())?;
-            Some(String::from_utf8_lossy(&bytes).into_owned())
-        } else if k == "filename" {
-            Some(v.trim().trim_matches('"').to_string())
-        } else {
-            None
-        }
-    })
-    .map(|n| sanitize_filename(&n))
-    .filter(|n| !n.is_empty())
+    value
+        .split(';')
+        .find_map(|p| {
+            let (k, v) = p.split_once('=')?;
+            let k = k.trim().to_ascii_lowercase();
+            if k == "filename*" {
+                let v = v.trim().trim_matches('"');
+                let encoded = v.rsplit("''").next()?;
+                let bytes: Vec<u8> = url::form_urlencoded::parse(format!("x={encoded}").as_bytes())
+                    .next()
+                    .map(|(_, v)| v.into_owned().into_bytes())?;
+                Some(String::from_utf8_lossy(&bytes).into_owned())
+            } else if k == "filename" {
+                Some(v.trim().trim_matches('"').to_string())
+            } else {
+                None
+            }
+        })
+        .map(|n| sanitize_filename(&n))
+        .filter(|n| !n.is_empty())
 }
 
 fn url_filename(url: &Url) -> String {
@@ -361,7 +368,10 @@ mod tests {
 
     #[test]
     fn content_type_parsing() {
-        assert_eq!(parse_content_type("Text/HTML; charset=\"ISO-8859-1\""), ("text/html".into(), Some("ISO-8859-1".into())));
+        assert_eq!(
+            parse_content_type("Text/HTML; charset=\"ISO-8859-1\""),
+            ("text/html".into(), Some("ISO-8859-1".into()))
+        );
         assert_eq!(parse_content_type(""), (String::new(), None));
     }
 

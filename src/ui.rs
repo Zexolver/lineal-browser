@@ -181,7 +181,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         let prompt = truncate(prompt, width / 2);
         let pw = prompt.width();
         let (text, cursor) = editor.view(width.saturating_sub(pw + 1));
-        let line = RLine::from(vec![RSpan::styled(prompt, Style::default().add_modifier(Modifier::BOLD)), RSpan::raw(text)]);
+        let line =
+            RLine::from(vec![RSpan::styled(prompt, Style::default().add_modifier(Modifier::BOLD)), RSpan::raw(text)]);
         f.render_widget(Paragraph::new(line), area);
         f.set_cursor_position(Position { x: area.x + (pw + cursor) as u16, y: area.y });
     };
@@ -208,10 +209,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         },
     };
     let left_w = width.saturating_sub(right.width());
-    let line = RLine::from(vec![
-        RSpan::raw(pad(&truncate(&left, left_w), left_w)),
-        RSpan::styled(right, fg(Color::DarkGray)),
-    ]);
+    let line =
+        RLine::from(vec![RSpan::raw(pad(&truncate(&left, left_w), left_w)), RSpan::styled(right, fg(Color::DarkGray))]);
     f.render_widget(Paragraph::new(line), area);
 }
 
