@@ -66,11 +66,7 @@ impl Dom {
                 "meta" if e.attr("http-equiv").is_some_and(|h| h.eq_ignore_ascii_case("refresh")) => {
                     refresh = e.attr("content").and_then(|c| parse_refresh(c, url));
                 }
-                "style" => {
-                    if e.attr("media").is_none_or(css::media_matches) {
-                        sheets.push(text_of(node));
-                    }
-                }
+                "style" if e.attr("media").is_none_or(css::media_matches) => sheets.push(text_of(node)),
                 _ => {}
             }
         }
