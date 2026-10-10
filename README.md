@@ -34,7 +34,7 @@ Download a build from the [releases](https://github.com/Zexolver/lineal-browser/
 cargo install --git https://github.com/Zexolver/lineal-browser
 ```
 
-Builds are made for Linux (x86_64, aarch64, armv7, riscv64, i686; static musl), Windows (x86_64,
+Builds are made for Linux (x86_64, aarch64, armv7, riscv64; static musl), Windows (x86_64,
 aarch64) and macOS (Intel, Apple silicon). A terminal with 24-bit color is recommended (almost all
 modern ones: Windows Terminal, kitty, WezTerm, foot, GNOME Terminal, Konsole, iTerm2, Alacritty…).
 

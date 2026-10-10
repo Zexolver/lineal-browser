@@ -41,7 +41,6 @@ jobs:
           - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
           - { target: armv7-unknown-linux-musleabihf, os: ubuntu-latest, zig: true }
           - { target: riscv64gc-unknown-linux-musl, os: ubuntu-latest, zig: true }
-          - { target: i686-unknown-linux-musl, os: ubuntu-latest, zig: true }
           - { target: x86_64-pc-windows-msvc, os: windows-latest }
           - { target: aarch64-pc-windows-msvc, os: windows-latest }
           - { target: x86_64-apple-darwin, os: macos-latest }
