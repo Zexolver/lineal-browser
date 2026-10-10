@@ -460,17 +460,26 @@ fn image_placeholders(doc: &BaseDocument, grid: &mut Grid) {
         };
         let y1 = y1 + 1;
         let alt = node.attr(blitz_dom::local_name!("alt")).unwrap_or("").trim().to_string();
+        // Never cover text: small images (icons, avatars) often overlap a line's row slightly.
+        let free = |c: &crate::paint::Cell| matches!(c.ch, ' ' | '▀');
         for row in y0..y1.max(y0 + 1).min(grid.rows) {
             for col in x0..x1 {
                 let cell = &mut grid.cells[row * grid.cols + col];
-                *cell = crate::paint::Cell { ch: ' ', fg: [90, 90, 100], bg: [228, 228, 234], attrs: 0 };
+                if free(cell) {
+                    *cell = crate::paint::Cell { ch: ' ', fg: [90, 90, 100], bg: [228, 228, 234], attrs: 0 };
+                }
             }
         }
-        let label: Vec<char> = if alt.is_empty() { "🖼".chars().collect() } else { alt.chars().collect() };
+        if alt.is_empty() || y1 - y0 < 1 {
+            continue;
+        }
         let row = y0 + (y1.saturating_sub(y0)) / 2;
         if row < grid.rows {
-            for (i, ch) in label.iter().take(x1 - x0).enumerate() {
-                grid.cells[row * grid.cols + x0 + i].ch = *ch;
+            for (i, ch) in alt.chars().take(x1 - x0).enumerate() {
+                let cell = &mut grid.cells[row * grid.cols + x0 + i];
+                if cell.bg == [228, 228, 234] {
+                    cell.ch = ch;
+                }
             }
         }
     }

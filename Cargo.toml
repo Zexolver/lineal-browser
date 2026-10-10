@@ -20,7 +20,7 @@ url = "2.5"
 unicode-width = "0.2"
 encoding_rs = "0.8.42"
 # Rendering engine: Blitz = Stylo (Firefox's CSS engine) + Taffy layout + Parley text.
-blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts"] }
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts", "floats"] }
 blitz-html = "=0.3.0-beta.2"
 blitz-traits = "=0.3.0-beta.2"
 blitz-paint = { version = "=0.3.0-beta.2", default-features = false }
