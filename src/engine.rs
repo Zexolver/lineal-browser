@@ -15,7 +15,7 @@ use blitz_traits::navigation::{NavigationOptions, NavigationProvider};
 use blitz_traits::net::{Body, Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::{ColorScheme, ShellProvider, Viewport};
 use keyboard_types::{Code, Key, Location, Modifiers};
-use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
+use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
 
@@ -45,8 +45,29 @@ impl Engine {
             source_cache: SourceCache::new_shared(),
             collection: Collection::new(CollectionOptions { shared: true, system_fonts: true }),
         };
-        for font in [FONT_REGULAR, FONT_BOLD, blitz_dom::BULLET_FONT] {
-            font_ctx.collection.register_fonts(Blob::new(Arc::new(font) as _), None);
+        let mut ours = Vec::new();
+        for font in [FONT_REGULAR, FONT_BOLD] {
+            let families = font_ctx.collection.register_fonts(Blob::new(Arc::new(font) as _), None);
+            ours.extend(families.into_iter().map(|(id, _)| id));
+        }
+        ours.dedup();
+        font_ctx.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+        // Our font comes first for every generic family too, so text that doesn't go through the
+        // page stylesheet (form fields use a built-in `sans-serif`) still lands on the grid.
+        // System fonts stay behind it as fallbacks for scripts it doesn't cover.
+        for generic in [
+            GenericFamily::SansSerif,
+            GenericFamily::Serif,
+            GenericFamily::Monospace,
+            GenericFamily::SystemUi,
+            GenericFamily::UiSansSerif,
+            GenericFamily::UiSerif,
+            GenericFamily::UiMonospace,
+            GenericFamily::Cursive,
+            GenericFamily::Fantasy,
+        ] {
+            let rest: Vec<_> = font_ctx.collection.generic_families(generic).filter(|f| !ours.contains(f)).collect();
+            font_ctx.collection.set_generic_families(generic, ours.iter().copied().chain(rest));
         }
         // Pick the font size whose advance is exactly one cell wide.
         let advance = skrifa::FontRef::new(FONT_REGULAR)
@@ -633,5 +654,35 @@ mod tests {
     fn data_urls() {
         assert_eq!(data_url("data:text/css;base64,Ym9keXt9").as_deref(), Some(&b"body{}"[..]));
         assert_eq!(data_url("data:text/css,a%20b").as_deref(), Some(&b"a b"[..]));
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn typing_into_a_field() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let engine = Engine::new(crate::net::client().unwrap(), tx);
+        let url = Url::parse("about:blank").unwrap();
+        let mut page = engine.page("<input name=q>", &url, 40, 10);
+        assert!(page.focus_next(true), "focus moved");
+        eprintln!("focused: {:?} wants_keys={}", page.doc.get_focussed_node_id(), page.wants_keys());
+        page.key(Key::Character("h".into()), Some("h"), Modifiers::empty());
+        page.key(Key::Character("i".into()), Some("i"), Modifiers::empty());
+        let id = page.doc.get_focussed_node_id().unwrap();
+        let value = page
+            .doc
+            .get_node(id)
+            .unwrap()
+            .element_data()
+            .unwrap()
+            .text_input_data()
+            .map(|d| d.editor.raw_text().to_string());
+        eprintln!("value: {value:?}");
+        let grid = page.paint();
+        let text = grid.text();
+        assert!(text.contains("hi"), "{text:?}");
     }
 }

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream,
 };
-use futures_util::{FutureExt, StreamExt};
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
 use crate::net::{Outcome, Request};
@@ -135,18 +135,25 @@ async fn run(start: Request, search: String) -> io::Result<()> {
     app.navigate(start);
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
+    // Events update state right away; the (comparatively expensive) repaint happens at most once
+    // per frame, so a burst of mouse moves doesn't queue up dozens of paints.
+    const FRAME: Duration = Duration::from_millis(25);
+    let mut last_draw = Instant::now() - FRAME;
+    let mut pending = true;
     let result = loop {
-        if let Err(e) = terminal.draw(|f| ui::draw(f, &mut app)) {
-            break Err(e);
+        if pending && last_draw.elapsed() >= FRAME {
+            if let Err(e) = terminal.draw(|f| ui::draw(f, &mut app)) {
+                break Err(e);
+            }
+            last_draw = Instant::now();
+            pending = false;
         }
+        let wait = FRAME.saturating_sub(last_draw.elapsed());
         tokio::select! {
             ev = events.next() => match ev {
                 Some(Ok(ev)) => {
                     app.on_event(ev);
-                    // Handle everything already queued (e.g. a burst of mouse moves) before redrawing.
-                    while let Some(Some(Ok(ev))) = events.next().now_or_never() {
-                        app.on_event(ev);
-                    }
+                    pending = true;
                 }
                 Some(Err(e)) => break Err(e),
                 None => break Ok(()),
@@ -156,11 +163,14 @@ async fn run(start: Request, search: String) -> io::Result<()> {
                 while let Ok(msg) = rx.try_recv() {
                     app.on_msg(msg);
                 }
+                pending = true;
             }
+            _ = tokio::time::sleep(wait), if pending => {}
             _ = tick.tick(), if app.loading.is_some() || app.message.is_some() => {
                 if app.message.as_ref().is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(5)) {
                     app.message = None;
                 }
+                pending = true;
             }
         }
         if app.quit {
