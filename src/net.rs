@@ -1,8 +1,6 @@
 //! Networking: HTTP(S) via reqwest + rustls (ring), local files, charset decoding and downloads.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use encoding_rs::{Encoding, UTF_8};
@@ -12,14 +10,6 @@ use url::Url;
 
 pub const USER_AGENT: &str =
     concat!("Lineal/", env!("CARGO_PKG_VERSION"), " (terminal browser; +https://github.com/Zexolver/lineal-browser)");
-
-/// External stylesheets: how many, how big and how long we wait for them.
-const MAX_SHEETS: usize = 8;
-const MAX_SHEET: usize = 2 * 1024 * 1024;
-const SHEET_TIMEOUT: Duration = Duration::from_secs(6);
-
-/// Hiding selectors per stylesheet URL, shared by all page loads in this session.
-static CSS_CACHE: LazyLock<Mutex<HashMap<Url, Arc<Vec<String>>>>> = LazyLock::new(Default::default);
 
 /// Documents bigger than this are cut off; nobody reads 16 MiB of text in a terminal.
 const MAX_DOCUMENT: usize = 16 * 1024 * 1024;
@@ -52,8 +42,6 @@ pub struct Document {
     pub mime: String,
     pub text: String,
     pub status: u16,
-    /// Hiding selectors from external stylesheets (see `css.rs`).
-    pub hidden: Vec<String>,
 }
 
 impl Document {
@@ -143,53 +131,7 @@ async fn fetch_http(client: &reqwest::Client, req: &Request) -> Result<Outcome, 
     }
     let html = mime == "text/html" || mime == "application/xhtml+xml" || mime.is_empty();
     let text = decode(&body, charset.as_deref(), html);
-    let hidden = if html { external_hiding_selectors(client, &text, &url).await } else { Vec::new() };
-    Ok(Outcome::Doc(Document { url, mime, text, status, hidden }))
-}
-
-/// Fetches the page's stylesheets in parallel and returns the selectors of rules that hide things.
-async fn external_hiding_selectors(client: &reqwest::Client, html: &str, base: &Url) -> Vec<String> {
-    let links = crate::css::stylesheet_links(html, base);
-    let mut out = Vec::new();
-    let mut tasks = tokio::task::JoinSet::new();
-    for url in links.into_iter().take(MAX_SHEETS) {
-        if let Some(cached) = CSS_CACHE.lock().unwrap().get(&url) {
-            out.extend(cached.iter().cloned());
-            continue;
-        }
-        let client = client.clone();
-        tasks.spawn(async move {
-            let selectors = fetch_sheet(&client, &url).await.map(|css| Arc::new(crate::css::hiding_selectors(&css)));
-            (url, selectors)
-        });
-    }
-    let deadline = tokio::time::Instant::now() + SHEET_TIMEOUT;
-    while let Ok(Some(joined)) = tokio::time::timeout_at(deadline, tasks.join_next()).await {
-        if let Ok((url, Some(selectors))) = joined {
-            out.extend(selectors.iter().cloned());
-            let mut cache = CSS_CACHE.lock().unwrap();
-            if cache.len() >= 64 {
-                cache.clear();
-            }
-            cache.insert(url, selectors);
-        }
-    }
-    out
-}
-
-async fn fetch_sheet(client: &reqwest::Client, url: &Url) -> Option<String> {
-    let mut resp = client.get(url.clone()).header(ACCEPT, "text/css,*/*;q=0.1").send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = resp.chunk().await.ok()? {
-        body.extend_from_slice(&chunk);
-        if body.len() > MAX_SHEET {
-            return None;
-        }
-    }
-    Some(String::from_utf8_lossy(&body).into_owned())
+    Ok(Outcome::Doc(Document { url, mime, text, status }))
 }
 
 async fn fetch_file(url: &Url) -> Result<Outcome, String> {
@@ -201,7 +143,6 @@ async fn fetch_file(url: &Url) -> Result<Outcome, String> {
             mime: "text/html".into(),
             text: directory_listing(&path).await?,
             status: 200,
-            hidden: Vec::new(),
         }));
     }
     let bytes = tokio::fs::read(&path).await.map_err(|e| format!("{}: {e}", path.display()))?;
@@ -215,7 +156,6 @@ async fn fetch_file(url: &Url) -> Result<Outcome, String> {
         mime: mime.into(),
         text: decode(&bytes, None, mime == "text/html"),
         status: 200,
-        hidden: Vec::new(),
     }))
 }
 

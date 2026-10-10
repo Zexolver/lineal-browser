@@ -16,12 +16,22 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "charset", "cookies", "gzip", "brotli", "deflate"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-scraper = { version = "0.27", default-features = false }
 url = "2.5"
 unicode-width = "0.2"
 encoding_rs = "0.8.42"
-html5ever = "0.39"
-ego-tree = "0.11"
+# Rendering engine: Blitz = Stylo (Firefox's CSS engine) + Taffy layout + Parley text.
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts"] }
+blitz-html = "=0.3.0-beta.2"
+blitz-traits = "=0.3.0-beta.2"
+blitz-paint = { version = "=0.3.0-beta.2", default-features = false }
+anyrender = "0.13"
+anyrender_vello_cpu = "0.17"
+parley = { version = "0.11", default-features = false, features = ["std"] }
+skrifa = "0.44"
+peniko = "0.6"
+kurbo = "0.13"
+keyboard-types = "0.7"
+bytes = "1"
 
 [profile.release]
 opt-level = "s"

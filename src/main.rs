@@ -1,56 +1,60 @@
-//! Lineal: a lightweight terminal web browser.
+//! Lineal: a lightweight web browser for the terminal.
 
 mod app;
-mod css;
-mod dom;
 mod editor;
-mod forms;
-mod layout;
+mod engine;
 mod net;
 mod pages;
+mod paint;
 mod ui;
 
 use std::io::{self, Write};
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream,
 };
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use tokio::sync::mpsc;
 
-use crate::layout::Target;
 use crate::net::{Outcome, Request};
 
 const USAGE: &str = "\
-Lineal - a lightweight terminal web browser
+Lineal - a lightweight web browser for the terminal
 
 Usage: lineal [options] [URL | file | search terms...]
 
 Options:
-  -d, --dump         print the rendered page as text and exit
-  -s, --source       print the page source and exit
-  -w, --width N      text width for --dump (default: terminal width or 80)
+  -d, --dump         render the page and print it as plain text
+      --dump-html    render the page and print it as an HTML file of terminal cells
+  -s, --source       print the page source
+  -w, --width N      columns for --dump (default: terminal width or 100)
   -h, --help         show this help
   -V, --version      show the version
 
 Environment:
   LINEAL_SEARCH      search URL template, %s is replaced by the query
   LINEAL_HOME        start page when no URL is given (default about:home)
-  NO_COLOR           disable colors
 
-Press ? inside Lineal for key bindings.";
+Press F1 inside Lineal for keys.";
+
+#[derive(PartialEq)]
+enum Output {
+    Browser,
+    Text,
+    Html,
+    Source,
+}
 
 struct Args {
     input: String,
-    dump: bool,
-    source: bool,
+    output: Output,
     width: Option<usize>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { input: String::new(), dump: false, source: false, width: None };
+    let mut args = Args { input: String::new(), output: Output::Browser, width: None };
     let mut words = Vec::new();
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -63,8 +67,9 @@ fn parse_args() -> Result<Args, String> {
                 println!("lineal {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
-            "-d" | "--dump" => args.dump = true,
-            "-s" | "--source" => args.source = true,
+            "-d" | "--dump" => args.output = Output::Text,
+            "--dump-html" => args.output = Output::Html,
+            "-s" | "--source" => args.output = Output::Source,
             "-w" | "--width" => {
                 let n = it.next().ok_or("--width needs a number")?;
                 args.width = Some(n.parse().map_err(|_| format!("bad width: {n}"))?);
@@ -99,10 +104,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = if args.dump || args.source {
-        runtime.block_on(dump(req, &search, args.width, args.source))
-    } else {
-        runtime.block_on(run(req, search)).map_err(|e| e.to_string())
+    let result = match args.output {
+        Output::Browser => runtime.block_on(run(req, search)).map_err(|e| e.to_string()),
+        _ => runtime.block_on(dump(req, &search, args.width, args.output)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -126,7 +130,9 @@ async fn run(start: Request, search: String) -> io::Result<()> {
     crossterm::execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
 
     let mut app = app::App::new(client, tx, search);
-    app.navigate(start, true);
+    let size = terminal.size()?;
+    app.set_viewport(0, 2, size.width as usize, size.height.saturating_sub(2) as usize);
+    app.navigate(start);
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     let result = loop {
@@ -135,11 +141,22 @@ async fn run(start: Request, search: String) -> io::Result<()> {
         }
         tokio::select! {
             ev = events.next() => match ev {
-                Some(Ok(ev)) => app.on_event(ev),
+                Some(Ok(ev)) => {
+                    app.on_event(ev);
+                    // Handle everything already queued (e.g. a burst of mouse moves) before redrawing.
+                    while let Some(Some(Ok(ev))) = events.next().now_or_never() {
+                        app.on_event(ev);
+                    }
+                }
                 Some(Err(e)) => break Err(e),
                 None => break Ok(()),
             },
-            Some(msg) = rx.recv() => app.on_msg(msg),
+            Some(msg) = rx.recv() => {
+                app.on_msg(msg);
+                while let Ok(msg) = rx.try_recv() {
+                    app.on_msg(msg);
+                }
+            }
             _ = tick.tick(), if app.loading.is_some() || app.message.is_some() => {
                 if app.message.as_ref().is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(5)) {
                     app.message = None;
@@ -155,8 +172,9 @@ async fn run(start: Request, search: String) -> io::Result<()> {
     result
 }
 
-/// `--dump` / `--source`: fetch one page and print it.
-async fn dump(mut req: Request, search: &str, width: Option<usize>, source: bool) -> Result<(), String> {
+/// `--dump`, `--dump-html`, `--source`: load one page, wait for its stylesheets, print it.
+async fn dump(mut req: Request, search: &str, width: Option<usize>, output: Output) -> Result<(), String> {
+    let client = net::client().map_err(|e| e.to_string())?;
     let doc = loop {
         if req.url.scheme() == "about" {
             match pages::about(&req.url, search) {
@@ -165,41 +183,67 @@ async fn dump(mut req: Request, search: &str, width: Option<usize>, source: bool
             }
             continue;
         }
-        let client = net::client().map_err(|e| e.to_string())?;
         match net::fetch(&client, &req).await? {
             Outcome::Doc(doc) => break doc,
             Outcome::Downloaded { path, bytes } => {
-                eprintln!("Saved {} ({})", path.display(), app::human_size(bytes));
+                eprintln!("Downloaded {} ({})", path.display(), app::human_size(bytes));
                 return Ok(());
             }
         }
     };
     let mut out = io::stdout().lock();
-    if source {
+    if output == Output::Source {
         return out.write_all(doc.text.as_bytes()).map_err(|e| e.to_string());
     }
-    let width = width.or_else(|| crossterm::terminal::size().ok().map(|(w, _)| w as usize)).unwrap_or(80);
-    let text = if doc.is_html() {
-        let dom = dom::Dom::parse(&doc.text, &doc.url, &doc.hidden);
-        let layout = dom.layout(width, true);
-        let mut text = layout.plain_text();
-        let links: Vec<String> = layout
-            .targets
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| match t {
-                Target::Link(u) => Some(format!("[{}] {u}", i + 1)),
-                Target::Field(_) => None,
-            })
-            .collect();
-        if !links.is_empty() {
-            text += "\nLinks:\n";
-            text += &links.join("\n");
-            text.push('\n');
-        }
-        text
-    } else {
-        layout::Layout::text(&doc.text, width).plain_text()
+    let cols = width.or_else(|| crossterm::terminal::size().ok().map(|(w, _)| w as usize)).unwrap_or(100);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let engine = engine::Engine::new(client, tx);
+    let html = if doc.is_html() { doc.text.clone() } else { pages::plain_text(&doc.text) };
+    let mut page = engine.page(&html, &doc.url, cols, 50);
+    // Give stylesheets a few seconds to arrive.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while engine.pending() > 0 && Instant::now() < deadline {
+        let _ = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let grid = page.paint_full(5000);
+    let text = match output {
+        Output::Html => grid_html(&grid),
+        _ => grid.text(),
     };
     out.write_all(text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// The rendered cells as HTML, colors included (handy for sharing or checking a rendering).
+fn grid_html(grid: &paint::Grid) -> String {
+    let mut out = String::from(
+        "<!doctype html><html><body style='background:#222;margin:0'><pre style='font:16px/16px DejaVu Sans Mono,monospace;margin:0'>",
+    );
+    for row in 0..grid.rows {
+        for col in 0..grid.cols {
+            let c = grid.get(col, row);
+            let mut extra = String::new();
+            if c.attrs & paint::attr::BOLD != 0 {
+                extra += ";font-weight:bold";
+            }
+            if c.attrs & paint::attr::UNDERLINE != 0 {
+                extra += ";text-decoration:underline";
+            }
+            if c.attrs & paint::attr::ITALIC != 0 {
+                extra += ";font-style:italic";
+            }
+            let ch = match c.ch {
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".into(),
+                '&' => "&amp;".into(),
+                ch => ch.to_string(),
+            };
+            out += &format!(
+                "<span style='color:rgb({},{},{});background:rgb({},{},{}){extra}'>{ch}</span>",
+                c.fg[0], c.fg[1], c.fg[2], c.bg[0], c.bg[1], c.bg[2]
+            );
+        }
+        out.push('\n');
+    }
+    out + "</pre></body></html>\n"
 }

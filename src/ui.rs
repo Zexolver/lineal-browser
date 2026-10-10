@@ -1,232 +1,238 @@
-//! Draws the app with ratatui: title bar, page, status/input line and popups.
+//! Draws the browser: Firefox-style tab strip and toolbar, the page, and status popups.
 
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line as RLine, Span as RSpan};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, Mode};
-use crate::layout::style::*;
+use crate::app::{App, Mode, Toolbar};
+use crate::paint::{Grid, attr};
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MESSAGE_TIME: Duration = Duration::from_secs(4);
 
-fn color() -> bool {
-    static COLOR: OnceLock<bool> = OnceLock::new();
-    *COLOR.get_or_init(|| std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty()))
+// Firefox's dark theme.
+const TABSTRIP_BG: [u8; 3] = [28, 27, 34];
+const TAB_BG: [u8; 3] = [66, 65, 77];
+const TOOLBAR_BG: [u8; 3] = [43, 42, 51];
+const FIELD_BG: [u8; 3] = [28, 27, 34];
+const FIELD_FOCUS_BG: [u8; 3] = [66, 65, 77];
+const TEXT: [u8; 3] = [251, 251, 254];
+const DIM: [u8; 3] = [140, 140, 155];
+const DISABLED: [u8; 3] = [90, 90, 102];
+const ACCENT: [u8; 3] = [0, 221, 255];
+
+/// How colors are sent to the terminal.
+#[derive(Clone, Copy, PartialEq)]
+enum Palette {
+    TrueColor,
+    Ansi256,
 }
 
-fn fg(c: Color) -> Style {
-    if color() { Style::default().fg(c) } else { Style::default() }
+fn palette() -> Palette {
+    static P: OnceLock<Palette> = OnceLock::new();
+    *P.get_or_init(|| {
+        let colorterm = std::env::var("COLORTERM").unwrap_or_default();
+        let apple = std::env::var("TERM_PROGRAM").is_ok_and(|t| t == "Apple_Terminal");
+        if apple && !colorterm.contains("truecolor") && !colorterm.contains("24bit") {
+            Palette::Ansi256
+        } else {
+            Palette::TrueColor
+        }
+    })
 }
 
-pub fn span_style(bits: u16) -> Style {
-    let mut s = Style::default();
-    let color = color();
-    if bits & BOLD != 0 {
-        s = s.add_modifier(Modifier::BOLD);
+pub fn rgb(c: [u8; 3]) -> Color {
+    match palette() {
+        Palette::TrueColor => Color::Rgb(c[0], c[1], c[2]),
+        Palette::Ansi256 => Color::Indexed(ansi256(c)),
     }
-    if bits & ITALIC != 0 {
-        s = s.add_modifier(Modifier::ITALIC);
-    }
-    if bits & UNDERLINE != 0 {
-        s = s.add_modifier(Modifier::UNDERLINED);
-    }
-    if bits & STRIKE != 0 {
-        s = s.add_modifier(Modifier::CROSSED_OUT);
-    }
-    if bits & DIM != 0 {
-        s = if color { s.fg(Color::DarkGray) } else { s.add_modifier(Modifier::DIM) };
-    }
-    if bits & IMAGE != 0 {
-        s = s.add_modifier(Modifier::ITALIC);
-        s = if color { s.fg(Color::DarkGray) } else { s.add_modifier(Modifier::DIM) };
-    }
-    if color {
-        if bits & CODE != 0 {
-            s = s.fg(Color::Green);
-        }
-        if bits & H1 != 0 {
-            s = s.fg(Color::Magenta).add_modifier(Modifier::UNDERLINED);
-        } else if bits & H2 != 0 {
-            s = s.fg(Color::Yellow);
-        } else if bits & H3 != 0 {
-            s = s.fg(Color::Blue);
-        }
-        if bits & MARK != 0 {
-            s = s.fg(Color::Black).bg(Color::Yellow);
-        }
-        if bits & LINK != 0 {
-            s = s.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
-        }
-        if bits & FIELD != 0 {
-            s = s.fg(Color::White).bg(Color::DarkGray);
-        }
-    } else {
-        if bits & (LINK | FIELD) != 0 {
-            s = s.add_modifier(Modifier::UNDERLINED);
-        }
-        if bits & MARK != 0 {
-            s = s.add_modifier(Modifier::REVERSED);
-        }
-    }
-    s
+}
+
+/// Nearest xterm-256 color.
+fn ansi256(c: [u8; 3]) -> u8 {
+    let level = |v: u8| if v < 48 { 0 } else if v < 115 { 1 } else { (v as u16 - 35) / 40 } as u8;
+    let (r, g, b) = (level(c[0]), level(c[1]), level(c[2]));
+    let cube = 16 + 36 * r + 6 * g + b;
+    let to_v = |l: u8| if l == 0 { 0 } else { 55 + 40 * l as i32 };
+    let cube_err: i32 = [(c[0], r), (c[1], g), (c[2], b)].iter().map(|&(v, l)| (v as i32 - to_v(l)).abs()).sum();
+    let avg = (c[0] as i32 + c[1] as i32 + c[2] as i32) / 3;
+    let gray = ((avg - 8).max(0) / 10).min(23);
+    let gray_v = 8 + gray * 10;
+    let gray_err: i32 = c.iter().map(|&v| (v as i32 - gray_v).abs()).sum();
+    if gray_err < cube_err { 232 + gray as u8 } else { cube }
+}
+
+fn style(fg: [u8; 3], bg: [u8; 3]) -> Style {
+    Style::default().fg(rgb(fg)).bg(rgb(bg))
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    if area.height < 3 || area.width < 12 {
-        f.render_widget(Paragraph::new("Lineal: window too small"), area);
+    if area.height < 4 || area.width < 20 {
+        f.buffer_mut().set_string(0, 0, "Lineal: window too small", Style::default());
         return;
     }
-    let top = Rect { height: 1, ..area };
-    let bottom = Rect { y: area.bottom() - 1, height: 1, ..area };
-    // One column of margin on each side reads much better than text glued to the edge.
-    let content = Rect { x: area.x + 1, y: area.y + 1, width: area.width - 2, height: area.height - 2 };
+    let content = Rect { x: area.x, y: area.y + 2, width: area.width, height: area.height - 2 };
     app.set_viewport(content.x, content.y, content.width as usize, content.height as usize);
 
-    draw_title(f, app, top);
-    draw_page(f, app, content);
-    draw_status(f, app, bottom);
-    if let Mode::Select { field, cursor } = app.mode {
-        draw_select(f, app, field, cursor, content);
+    draw_tabs(f.buffer_mut(), app, Rect { height: 1, ..area });
+    let cursor = draw_toolbar(f.buffer_mut(), app, Rect { y: area.y + 1, height: 1, ..area });
+    match app.grid() {
+        Some(grid) => blit(f.buffer_mut(), grid, content),
+        None => f.buffer_mut().set_style(content, style([0, 0, 0], [255, 255, 255])),
+    }
+    draw_scrollbar(f.buffer_mut(), app, content);
+    draw_status(f.buffer_mut(), app, content);
+    if let Some(pos) = cursor {
+        f.set_cursor_position(pos);
     }
 }
 
-fn draw_title(f: &mut Frame, app: &App, area: Rect) {
-    let bar = Style::default().add_modifier(Modifier::REVERSED);
-    let right = match &app.loading {
-        Some(l) => {
-            let frame = (l.since.elapsed().as_millis() / 100) as usize % SPINNER.len();
-            format!(" {} {} ", SPINNER[frame], l.url)
+fn fill(buf: &mut Buffer, area: Rect, bg: [u8; 3]) {
+    buf.set_style(area, Style::default().bg(rgb(bg)));
+    for x in area.left()..area.right() {
+        for y in area.top()..area.bottom() {
+            buf[(x, y)].set_symbol(" ");
         }
-        None => String::new(),
-    };
-    let right = truncate(&right, area.width as usize / 2);
-    let left_w = (area.width as usize).saturating_sub(right.width());
-    let title = if app.page.title.is_empty() { "Lineal".to_string() } else { app.page.title.clone() };
-    let left = pad(&truncate(&format!(" {title}"), left_w), left_w);
-    let line = RLine::from(vec![RSpan::styled(left, bar.add_modifier(Modifier::BOLD)), RSpan::styled(right, bar)]);
-    f.render_widget(Paragraph::new(line), area);
+    }
 }
 
-fn draw_page(f: &mut Frame, app: &App, area: Rect) {
-    let page = &app.page;
-    let end = (page.scroll + area.height as usize).min(page.layout.lines.len());
-    let lines: Vec<RLine> = page.layout.lines[page.scroll.min(end)..end]
-        .iter()
-        .map(|l| {
-            RLine::from(
-                l.spans
-                    .iter()
-                    .map(|s| {
-                        let mut st = span_style(s.style);
-                        if s.target.is_some() && s.target == page.focus {
-                            st = st.add_modifier(Modifier::REVERSED);
-                        }
-                        RSpan::styled(s.text.as_str(), st)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect();
-    f.render_widget(Paragraph::new(lines), area);
+/// Writes `s` clipped to `max` columns; returns the columns used.
+fn put(buf: &mut Buffer, x: u16, y: u16, s: &str, max: usize, st: Style) -> usize {
+    let s = truncate(s, max);
+    buf.set_stringn(x, y, &s, max, st);
+    s.width()
+}
 
-    let buf = f.buffer_mut();
-    let row_of = |line: usize| -> Option<u16> {
-        (line >= page.scroll && line < page.scroll + area.height as usize).then(|| area.y + (line - page.scroll) as u16)
+fn draw_tabs(buf: &mut Buffer, app: &App, area: Rect) {
+    fill(buf, area, TABSTRIP_BG);
+    let tab_w = (area.width as usize).clamp(12, 34).min(area.width as usize - 4);
+    let tab = Rect { x: area.x + 1, width: tab_w as u16, ..area };
+    fill(buf, tab, TAB_BG);
+    let icon = match &app.loading {
+        Some(l) => SPINNER[(l.since.elapsed().as_millis() / 100) as usize % SPINNER.len()],
+        None => "◆",
     };
-    if let Some(find) = &app.find {
-        for (i, &(line, col, w)) in find.matches.iter().enumerate() {
-            let Some(y) = row_of(line) else { continue };
-            let x = area.x + col as u16;
-            if col >= area.width as usize {
+    let title = if app.title.is_empty() { "New Tab" } else { &app.title };
+    buf.set_string(tab.x + 1, tab.y, icon, style(if app.loading.is_some() { ACCENT } else { DIM }, TAB_BG));
+    put(buf, tab.x + 3, tab.y, title, tab_w.saturating_sub(6), style(TEXT, TAB_BG));
+    buf.set_string(tab.right() - 2, tab.y, "×", style(DIM, TAB_BG));
+    buf.set_string(tab.right() + 1, tab.y, "+", style(DIM, TABSTRIP_BG));
+}
+
+/// Draws back/forward/reload and the address field. Returns where the text cursor goes when editing.
+fn draw_toolbar(buf: &mut Buffer, app: &mut App, area: Rect) -> Option<Position> {
+    fill(buf, area, TOOLBAR_BG);
+    let y = area.y;
+    let button = |enabled: bool| style(if enabled { TEXT } else { DISABLED }, TOOLBAR_BG);
+    buf.set_string(area.x + 1, y, "←", button(app.can_go_back()));
+    buf.set_string(area.x + 4, y, "→", button(app.can_go_forward()));
+    buf.set_string(area.x + 7, y, if app.loading.is_some() { "×" } else { "↻" }, button(true));
+    let field = Rect { x: area.x + 10, y, width: area.width.saturating_sub(13), height: 1 };
+    app.toolbar = Toolbar {
+        row: y,
+        back: (area.x, area.x + 3),
+        forward: (area.x + 3, area.x + 6),
+        reload: (area.x + 6, area.x + 9),
+        address: (field.x, field.right()),
+    };
+    let editing = matches!(app.mode, Mode::Address(_));
+    let bg = if editing { FIELD_FOCUS_BG } else { FIELD_BG };
+    fill(buf, field, bg);
+    buf.set_string(area.right() - 2, y, "≡", button(true));
+    let inner_w = field.width.saturating_sub(2) as usize;
+    if let Mode::Address(editor) = &app.mode {
+        let (text, cursor) = editor.view(inner_w);
+        let st = if editor.selected { style(TEXT, [0, 96, 223]) } else { style(TEXT, bg) };
+        buf.set_stringn(field.x + 1, y, &text, inner_w, st);
+        return Some(Position { x: field.x + 1 + cursor as u16, y });
+    }
+    // Like Firefox: the host stands out, the rest of the URL is dimmed.
+    let url = &app.url;
+    if url.scheme() == "about" && matches!(url.path(), "home" | "newtab" | "blank") {
+        put(buf, field.x + 1, y, "Search or enter address", inner_w, style(DIM, bg));
+        return None;
+    }
+    let full = url.as_str();
+    let (pre, host, rest) = match url.host_str().and_then(|h| full.find(h).map(|i| (i, h.len()))) {
+        Some((i, n)) => (&full[..i], &full[i..i + n], &full[i + n..]),
+        None => ("", full, ""),
+    };
+    let mut x = field.x + 1;
+    let mut left = inner_w;
+    for (part, color) in [(pre, DIM), (host, TEXT), (rest, DIM)] {
+        let used = put(buf, x, y, part, left, style(color, bg));
+        x += used as u16;
+        left -= used.min(left);
+    }
+    None
+}
+
+/// Copies the painted page into the terminal buffer.
+fn blit(buf: &mut Buffer, grid: &Grid, area: Rect) {
+    for row in 0..grid.rows.min(area.height as usize) {
+        let mut skip = 0;
+        for col in 0..grid.cols.min(area.width as usize) {
+            let cell = &mut buf[(area.x + col as u16, area.y + row as u16)];
+            cell.reset();
+            let g = grid.get(col, row);
+            if skip > 0 {
+                skip -= 1;
+                cell.set_diff_option(ratatui::buffer::CellDiffOption::Skip);
                 continue;
             }
-            let w = w.min(area.width as usize - col) as u16;
-            let style = if !color() {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else if i == find.current {
-                Style::default().fg(Color::Black).bg(Color::LightRed)
-            } else {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            };
-            buf.set_style(Rect { x, y, width: w, height: 1 }, style);
-        }
-    }
-    if let Mode::Hints { hints, typed } = &app.mode {
-        let style = if color() {
-            Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        };
-        for h in hints.iter().filter(|h| h.label.starts_with(typed.as_str())) {
-            let Some(y) = row_of(h.line) else { continue };
-            if h.col + h.label.len() > area.width as usize {
+            let mut st = style(g.fg, g.bg);
+            if g.attrs & attr::BOLD != 0 {
+                st = st.add_modifier(Modifier::BOLD);
+            }
+            if g.attrs & attr::ITALIC != 0 {
+                st = st.add_modifier(Modifier::ITALIC);
+            }
+            if g.attrs & attr::UNDERLINE != 0 {
+                st = st.add_modifier(Modifier::UNDERLINED);
+            }
+            let w = g.ch.width().unwrap_or(0);
+            if w == 0 || (w == 2 && col + 1 >= area.width as usize) {
+                cell.set_char(' ').set_style(st);
                 continue;
             }
-            buf.set_string(area.x + h.col as u16, y, &h.label, style);
+            cell.set_char(g.ch).set_style(st);
+            skip = w - 1;
         }
     }
 }
 
-fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let width = area.width as usize;
-    let input = |f: &mut Frame, prompt: &str, editor: &crate::editor::Editor| {
-        let prompt = truncate(prompt, width / 2);
-        let pw = prompt.width();
-        let (text, cursor) = editor.view(width.saturating_sub(pw + 1));
-        let line =
-            RLine::from(vec![RSpan::styled(prompt, Style::default().add_modifier(Modifier::BOLD)), RSpan::raw(text)]);
-        f.render_widget(Paragraph::new(line), area);
-        f.set_cursor_position(Position { x: area.x + (pw + cursor) as u16, y: area.y });
-    };
-    match &app.mode {
-        Mode::Url(e) => return input(f, "Go: ", e),
-        Mode::Find(e) => return input(f, "/", e),
-        Mode::Edit { field, editor } => return input(f, &format!("{}: ", app.field_name(*field)), editor),
-        _ => {}
+fn draw_scrollbar(buf: &mut Buffer, app: &App, area: Rect) {
+    let Some((top, bottom)) = app.scroll_fraction() else { return };
+    let h = area.height as f64;
+    let (y0, y1) = ((top * h).floor() as u16, ((bottom * h).ceil() as u16).max((top * h).floor() as u16 + 1));
+    let x = area.right() - 1;
+    for y in y0..y1.min(area.height) {
+        let cell = &mut buf[(x, area.y + y)];
+        cell.set_symbol("▐").set_fg(rgb([150, 150, 160]));
     }
-    let lines = app.page.layout.lines.len();
-    let pos = if lines <= app.height {
-        "All".to_string()
-    } else {
-        let pct = (app.page.scroll + app.height).min(lines) * 100 / lines;
-        format!("{pct}%")
-    };
-    let right = format!(" {pos}  ? help ");
-    let left = match &app.mode {
-        Mode::Hints { typed, .. } => format!("Follow: {typed}"),
-        Mode::Select { .. } => "Pick with ↑↓ and Enter, Esc to cancel".into(),
-        _ => match &app.message {
-            Some((m, at)) if at.elapsed() < MESSAGE_TIME => m.clone(),
-            _ => app.focus_description().unwrap_or_else(|| app.page.url().to_string()),
+}
+
+/// Firefox shows link targets and short messages in a popup at the bottom-left.
+fn draw_status(buf: &mut Buffer, app: &App, area: Rect) {
+    let text = match &app.message {
+        Some((m, at)) if at.elapsed() < MESSAGE_TIME => m.clone(),
+        _ => match (&app.hover, &app.loading) {
+            (Some(url), _) => url.to_string(),
+            (None, Some(l)) => format!("Loading {}…", l.url),
+            _ => return,
         },
     };
-    let left_w = width.saturating_sub(right.width());
-    let line =
-        RLine::from(vec![RSpan::raw(pad(&truncate(&left, left_w), left_w)), RSpan::styled(right, fg(Color::DarkGray))]);
-    f.render_widget(Paragraph::new(line), area);
-}
-
-fn draw_select(f: &mut Frame, app: &App, field: usize, cursor: usize, area: Rect) {
-    let options = app.select_options(field);
-    let w = options.iter().map(|o| o.width()).max().unwrap_or(0).clamp(10, area.width as usize - 4) as u16 + 4;
-    let h = (options.len() as u16 + 2).min(area.height);
-    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
-    let items: Vec<ListItem> = options.iter().map(|o| ListItem::new(truncate(o, w as usize - 4))).collect();
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Choose "))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .highlight_symbol("> ");
-    let mut state = ListState::default().with_selected(Some(cursor));
-    f.render_widget(Clear, rect);
-    f.render_stateful_widget(list, rect, &mut state);
+    let max = (area.width as usize * 2 / 3).max(20).min(area.width as usize);
+    let text = truncate(&format!(" {text} "), max);
+    let y = area.bottom() - 1;
+    let st = style([21, 20, 26], [240, 240, 244]);
+    buf.set_string(area.x, y, &text, st);
 }
 
 fn truncate(s: &str, width: usize) -> String {
@@ -236,7 +242,7 @@ fn truncate(s: &str, width: usize) -> String {
     let mut out = String::new();
     let mut w = 0;
     for c in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        let cw = c.width().unwrap_or(0);
         if w + cw + 1 > width {
             break;
         }
@@ -249,6 +255,15 @@ fn truncate(s: &str, width: usize) -> String {
     out
 }
 
-fn pad(s: &str, width: usize) -> String {
-    format!("{s}{}", " ".repeat(width.saturating_sub(s.width())))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_quantization() {
+        assert_eq!(ansi256([0, 0, 0]), 16);
+        assert_eq!(ansi256([255, 255, 255]), 231);
+        assert_eq!(ansi256([255, 0, 0]), 196);
+        assert_eq!(ansi256([128, 128, 128]), 244);
+    }
 }

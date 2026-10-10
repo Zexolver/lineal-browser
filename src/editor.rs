@@ -15,12 +15,19 @@ pub enum Edit {
 pub struct Editor {
     chars: Vec<char>,
     cursor: usize,
+    /// Everything is selected (like a browser's address bar on focus): typing replaces it.
+    pub selected: bool,
 }
 
 impl Editor {
     pub fn new(text: &str) -> Self {
         let chars: Vec<char> = text.chars().collect();
-        Self { cursor: chars.len(), chars }
+        Self { cursor: chars.len(), chars, selected: false }
+    }
+
+    /// An editor with all its text selected.
+    pub fn selected(text: &str) -> Self {
+        Self { selected: !text.is_empty(), ..Self::new(text) }
     }
 
     pub fn text(&self) -> String {
@@ -29,6 +36,17 @@ impl Editor {
 
     pub fn key(&mut self, key: KeyEvent) -> Edit {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if std::mem::take(&mut self.selected) {
+            match key.code {
+                KeyCode::Char(_) if !ctrl => self.clear(),
+                KeyCode::Backspace | KeyCode::Delete => {
+                    self.clear();
+                    return Edit::Continue;
+                }
+                KeyCode::Left | KeyCode::Home => self.cursor = 0,
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Enter => return Edit::Submit,
             KeyCode::Esc => return Edit::Cancel,
@@ -74,7 +92,15 @@ impl Editor {
         Edit::Continue
     }
 
+    fn clear(&mut self) {
+        self.chars.clear();
+        self.cursor = 0;
+    }
+
     pub fn paste(&mut self, text: &str) {
+        if std::mem::take(&mut self.selected) {
+            self.clear();
+        }
         for c in text.chars().filter(|c| !c.is_control()) {
             self.chars.insert(self.cursor, c);
             self.cursor += 1;

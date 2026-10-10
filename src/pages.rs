@@ -1,103 +1,125 @@
-//! Built-in `about:` pages, rendered by the same engine as everything else.
+//! Built-in `about:` pages, rendered by the same engine as any website.
 
-use crate::net::escape;
+use url::Url;
+
+use crate::net::{Document, escape};
 
 pub const KEYS: &[(&str, &str)] = &[
-    ("o", "open a URL or search"),
-    ("O", "edit the current URL"),
-    ("Tab / Shift-Tab", "next / previous link or field"),
-    ("Enter", "follow link / activate field"),
-    ("f", "link hints: type the label to follow"),
-    ("j k / ↓ ↑", "scroll a line"),
-    ("Space / b, PgDn / PgUp", "scroll a page"),
-    ("Ctrl-d / Ctrl-u", "scroll half a page"),
-    ("g / G, Home / End", "top / bottom"),
-    ("H / L, Backspace, Alt-← / Alt-→", "back / forward"),
-    ("r / F5", "reload"),
-    ("/  then  n / N", "find in page, next / previous match"),
-    ("y / Y", "copy page URL / focused link URL (OSC 52)"),
-    ("\\", "toggle page source"),
-    ("Esc", "stop loading, clear focus and search"),
-    ("?", "this help"),
-    ("q / Ctrl-c", "quit"),
+    ("Ctrl-L, Alt-D, F6", "Edit the address (type a URL or a search)"),
+    ("Mouse", "Click links, buttons and fields; wheel to scroll"),
+    ("Tab / Shift-Tab", "Move between links and form fields"),
+    ("Enter", "Follow the focused link / press the focused button"),
+    ("↑ ↓, PgUp PgDn, Space", "Scroll"),
+    ("Home / End", "Top / bottom of the page"),
+    ("Alt-← / Alt-→, Backspace", "Back / forward"),
+    ("F5, Ctrl-R", "Reload"),
+    ("Esc", "Stop loading, leave a text field"),
+    ("F1", "This help"),
+    ("Ctrl-Q, Ctrl-C", "Quit"),
 ];
 
-pub fn home() -> String {
+const STYLE: &str = r#"
+  body { margin: 0; background: #f9f9fb; color: #15141a; font-family: sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 24px; }
+  h1 { color: #592acb; margin: 0 0 8px 0; }
+  .sub { color: #5b5b66; margin-bottom: 32px; }
+  form { display: flex; gap: 8px; margin-bottom: 32px; }
+  input[type=text] { flex: 1; padding: 0 8px; border: 1px solid #8f8f9d; border-radius: 4px; background: white; color: #15141a; }
+  button { padding: 0 16px; background: #0061e0; color: white; border: none; border-radius: 4px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+  .tile { display: block; background: white; border: 1px solid #e0e0e6; border-radius: 8px; padding: 16px; color: #15141a; text-decoration: none; }
+  .tile b { color: #0061e0; display: block; }
+  .tile span { color: #5b5b66; }
+  table { border-collapse: collapse; width: 100%; background: white; }
+  td { padding: 0 8px; border-bottom: 1px solid #e0e0e6; }
+  td:first-child { color: #0061e0; font-weight: bold; white-space: nowrap; }
+  code { background: #ededf0; padding: 0 4px; }
+  .err { background: #fff4f4; border-left: 4px solid #d70022; padding: 16px; }
+  .foot { color: #8f8f9d; margin-top: 32px; }
+"#;
+
+fn page(title: &str, body: &str) -> String {
     format!(
-        r#"<title>Lineal</title>
-<h1>Lineal</h1>
-<p>A lightweight terminal web browser.</p>
-<form action="about:search"><input name="q" size="40" placeholder="Search the web"> <input type="submit" value="Search"></form>
-<p>Press <kbd>o</kbd> to open a URL or search, <kbd>Tab</kbd> to move between links, <kbd>f</kbd> for link hints and <kbd>?</kbd> for help.</p>
-<h2>Try</h2>
-<ul>
-<li><a href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite</a></li>
-<li><a href="https://en.wikipedia.org/wiki/Special:Random">A random Wikipedia article</a></li>
-<li><a href="https://news.ycombinator.com/">Hacker News</a></li>
-<li><a href="https://lobste.rs/">Lobsters</a></li>
-<li><a href="https://text.npr.org/">NPR text-only news</a></li>
-<li><a href="https://github.com/Zexolver/lineal-browser">Lineal on GitHub</a></li>
-</ul>
-<p>Lineal {}</p>"#,
-        env!("CARGO_PKG_VERSION")
+        "<!doctype html><html><head><title>{title}</title><style>{STYLE}</style></head><body><div class=wrap>{body}</div></body></html>"
+    )
+}
+
+pub fn home() -> String {
+    let tiles = [
+        ("Wikipedia", "The free encyclopedia", "https://en.wikipedia.org/"),
+        ("Hacker News", "Tech news and discussion", "https://news.ycombinator.com/"),
+        ("Lobsters", "Computing-focused links", "https://lobste.rs/"),
+        ("NPR Text", "Text-only news", "https://text.npr.org/"),
+        ("DuckDuckGo Lite", "Private web search", "https://lite.duckduckgo.com/lite/"),
+        ("Lineal on GitHub", "Source and releases", "https://github.com/Zexolver/lineal-browser"),
+    ];
+    let tiles: String =
+        tiles.iter().map(|(t, d, u)| format!("<a class=tile href=\"{u}\"><b>{t}</b><span>{d}</span></a>")).collect();
+    page(
+        "New Tab",
+        &format!(
+            r#"<h1>Lineal</h1><div class=sub>A lightweight web browser for your terminal.</div>
+<form action="about:search"><input type=text name=q placeholder="Search the web or type a URL"><button>Search</button></form>
+<div class=tiles>{tiles}</div>
+<div class=foot>Lineal {} · press F1 for keys</div>"#,
+            env!("CARGO_PKG_VERSION")
+        ),
     )
 }
 
 pub fn help() -> String {
-    let mut rows = String::new();
-    for (k, v) in KEYS {
-        rows += &format!("<tr><td><kbd>{}</kbd><td>{}</tr>", escape(k), escape(v));
-    }
-    format!(
-        r#"<title>Help</title><h1>Keys</h1><table>{rows}</table>
-<h2>In text boxes</h2>
-<p>Enter submits, Tab moves to the next field, Esc cancels. Ctrl-a/e/u/k/w work like in a shell.</p>
-<h2>Mouse</h2>
-<p>Click links and fields, scroll with the wheel.</p>
-<h2>Environment</h2>
-<ul>
-<li><code>LINEAL_SEARCH</code>: search URL with <code>%s</code> for the query (default DuckDuckGo Lite).</li>
-<li><code>LINEAL_HOME</code>: start page when no URL is given.</li>
-<li><code>NO_COLOR</code>: disable colors.</li>
-</ul>
+    let rows: String =
+        KEYS.iter().map(|(k, v)| format!("<tr><td>{}</td><td>{}</td></tr>", escape(k), escape(v))).collect();
+    page(
+        "Help",
+        &format!(
+            r#"<h1>Keys</h1><table>{rows}</table>
+<h2>Settings</h2>
+<p><code>LINEAL_SEARCH</code>: search URL with <code>%s</code> for the query (default DuckDuckGo Lite).<br>
+<code>LINEAL_HOME</code>: start page when no URL is given.</p>
 <p><a href="about:home">Back to the start page</a></p>"#
+        ),
     )
 }
 
 pub fn error(url: &str, message: &str) -> String {
+    page(
+        "Problem loading page",
+        &format!(
+            r#"<h1>Hmm. We can't load this page.</h1><div class=err><b>{}</b><br>{}</div>
+<p>Press F5 to try again, or Alt-← to go back.</p>"#,
+            escape(url),
+            escape(message)
+        ),
+    )
+}
+
+/// Plain text documents are shown like browsers do: preformatted, in a monospace font.
+pub fn plain_text(text: &str) -> String {
     format!(
-        r#"<title>Error</title><h1>Could not load the page</h1><p><code>{}</code></p><pre>{}</pre><p>Press <kbd>r</kbd> to retry or <kbd>H</kbd> to go back.</p>"#,
-        escape(url),
-        escape(message)
+        "<!doctype html><html><body><pre style=\"white-space: pre-wrap; margin: 8px\">{}</pre></body></html>",
+        escape(text)
     )
 }
 
 pub enum About {
-    Page(crate::net::Document),
-    Redirect(url::Url),
+    Page(Document),
+    Redirect(Url),
 }
 
-/// Resolves an `about:` URL. `about:search?q=…` redirects to the search engine.
-pub fn about(url: &url::Url, search: &str) -> About {
+/// Resolves an `about:` URL. `about:search?q=…` goes to the search engine (or the URL typed).
+pub fn about(url: &Url, search: &str) -> About {
     if url.path() == "search" {
         let q = url.query_pairs().find(|(k, _)| k == "q").map(|(_, v)| v.into_owned()).unwrap_or_default();
-        if let Ok(u) = url::Url::parse(&search_url(search, &q)) {
-            return About::Redirect(u);
-        }
+        return About::Redirect(crate::app::resolve_input(&q, search).url);
     }
     let text = match url.path() {
-        "home" => home(),
+        "home" | "newtab" => home(),
         "help" => help(),
         "blank" => String::new(),
-        other => error(url.as_str(), &format!("unknown page about:{other}")),
+        other => error(url.as_str(), &format!("There is no page called about:{other}.")),
     };
-    About::Page(crate::net::Document {
-        url: url.clone(),
-        mime: "text/html".into(),
-        text,
-        status: 200,
-        hidden: Vec::new(),
-    })
+    About::Page(Document { url: url.clone(), mime: "text/html".into(), text, status: 200 })
 }
 
 pub const DEFAULT_SEARCH: &str = "https://lite.duckduckgo.com/lite/?q=%s";
