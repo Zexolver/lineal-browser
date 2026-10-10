@@ -503,13 +503,21 @@ fn draw_lines(grid: &mut Grid, hlines: &[Line], vlines: &[Line]) {
         if c0 >= c1 {
             continue;
         }
-        // A line in the lower half of a row that has text over it is an underline.
-        let underline = frac > 0.5 && (c0..c1).any(|c| is_text(grid.get(c, row)));
+        // A line in the lower half of a row that has text over it is an underline. Any other line
+        // through a row of text (a box edge that lands there) would just chop up the gaps between
+        // words, so it's left out.
+        let text_fg = (c0..c1).map(|c| grid.get(c, row)).find(|c| is_text(c)).map(|c| c.fg);
+        // Real underlines are drawn in the text color (`currentColor`); anything else under text
+        // is a background sliver or box edge.
+        let underline = frac > 0.5 && text_fg.is_some_and(|fg| distance(fg, l.rgb) < 90);
+        if text_fg.is_some() && !underline {
+            continue;
+        }
         for c in c0..c1 {
             let cell = &mut grid.cells[row * grid.cols + c];
             if underline {
                 cell.attrs |= attr::UNDERLINE;
-            } else if !is_text(cell) {
+            } else if !is_text(cell) && distance(cell.bg, l.rgb) > 40 {
                 cell.ch = if frac < 0.3 {
                     '▔'
                 } else if frac > 0.7 {
@@ -533,7 +541,7 @@ fn draw_lines(grid: &mut Grid, hlines: &[Line], vlines: &[Line]) {
         };
         for r in r0..=r1.max(r0).min(grid.rows - 1) {
             let cell = &mut grid.cells[r * grid.cols + col];
-            if !is_text(cell) && !matches!(cell.ch, '▔' | '▁' | '─') {
+            if !is_text(cell) && !matches!(cell.ch, '▔' | '▁' | '─') && distance(cell.bg, l.rgb) > 40 {
                 cell.ch = if frac < 0.35 {
                     '▏'
                 } else if frac > 0.65 {

@@ -186,7 +186,7 @@ async fn run(start: Request, search: String) -> io::Result<()> {
 async fn dump(mut req: Request, search: &str, width: Option<usize>, output: Output) -> Result<(), String> {
     let client = net::client().map_err(|e| e.to_string())?;
     let doc = loop {
-        if req.url.scheme() == "about" {
+        if pages::is_internal(&req.url) {
             match pages::about(&req.url, search) {
                 pages::About::Page(doc) => break doc,
                 pages::About::Redirect(url) => req = Request::get(url),

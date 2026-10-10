@@ -164,7 +164,7 @@ impl App {
 
     fn load(&mut self, mut req: Request, push: bool, scroll: Option<f64>) {
         self.mode = Mode::Normal;
-        if req.url.scheme() == "about" {
+        if pages::is_internal(&req.url) {
             match pages::about(&req.url, &self.search) {
                 About::Redirect(url) => req = Request::get(url),
                 About::Page(doc) => {
@@ -490,6 +490,7 @@ impl App {
             return;
         }
         let rows = self.viewport.3 as f64;
+        let moves_focus = matches!(key.code, KeyCode::Tab | KeyCode::BackTab);
         match key.code {
             KeyCode::Char('c') if ctrl => self.quit = true,
             KeyCode::Tab => {
@@ -521,6 +522,10 @@ impl App {
                 }
             }
             _ => {}
+        }
+        // Like Firefox, show where a keyboard-focused link goes.
+        if moves_focus {
+            self.hover = self.page.as_ref().and_then(|p| p.focused_link());
         }
     }
 }

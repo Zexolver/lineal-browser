@@ -27,6 +27,9 @@ const FONT_REGULAR: &[u8] = include_bytes!("../assets/fonts/DejaVuSansMono.ttf")
 const FONT_BOLD: &[u8] = include_bytes!("../assets/fonts/DejaVuSansMono-Bold.ttf");
 const FONT_FAMILY: &str = "DejaVu Sans Mono";
 
+/// Keyboard focus highlight (a terminal can't show a thin focus ring well).
+const FOCUS_BG: &str = "#ffd75e";
+
 /// Biggest subresource (stylesheet, image…) we download.
 const MAX_RESOURCE: usize = 10 * 1024 * 1024;
 
@@ -87,10 +90,17 @@ impl Engine {
         let font_size = CELL_W / advance;
         // User-agent `!important` rules beat everything a page says (CSS cascade), which is how we
         // keep every page on the grid: one font, one size, one line height.
+        // Tables use separate borders: Blitz's collapsed-border painting draws lines between all
+        // rows even when a table has no borders, and 1-2px spacing is invisible in a terminal anyway.
         let ua_css = format!(
             "*, *::before, *::after, input, textarea, select, button {{ \
                 font-family: '{FONT_FAMILY}' !important; font-size: {font_size:.4}px !important; \
-                line-height: {CELL_H}px !important; letter-spacing: 0 !important; word-spacing: 0 !important; }}"
+                line-height: {CELL_H}px !important; letter-spacing: 0 !important; word-spacing: 0 !important; }} \
+             a:focus, button:focus, select:focus, [tabindex]:focus, input[type=submit]:focus, \
+             input[type=button]:focus, input[type=checkbox]:focus, input[type=radio]:focus {{ \
+                background-color: {FOCUS_BG} !important; color: #15141a !important; outline: none !important; }} \
+             input:focus, textarea:focus {{ outline: none !important; }} \
+             table {{ border-collapse: separate !important; border-spacing: 0 !important; }}"
         );
         Engine {
             font_ctx,
@@ -318,6 +328,15 @@ impl Page {
                     node.attr(blitz_dom::local_name!("type")).map(|t| t.to_ascii_lowercase()).as_deref(),
                     Some("checkbox" | "radio" | "submit" | "button" | "reset" | "image" | "hidden" | "file")
                 ))
+    }
+
+    /// Where the focused link points, if a link has keyboard focus.
+    pub fn focused_link(&self) -> Option<Url> {
+        let node = self.doc.get_node(self.doc.get_focussed_node_id()?)?;
+        if tag(node) != Some("a") {
+            return None;
+        }
+        self.doc.base_url().join(node.attr(blitz_dom::local_name!("href"))?.trim()).ok()
     }
 
     pub fn has_focus(&self) -> bool {
@@ -684,5 +703,31 @@ mod input_tests {
         let grid = page.paint();
         let text = grid.text();
         assert!(text.contains("hi"), "{text:?}");
+    }
+}
+
+#[cfg(test)]
+mod submit_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn enter_submits_forms() {
+        for action in ["https://example.org/s", "https://lineal.invalid/search"] {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let engine = Engine::new(crate::net::client().unwrap(), tx);
+            let url = Url::parse("about:home").unwrap();
+            let html = format!("<form action=\"{action}\"><input name=q><button>Go</button></form>");
+            let mut page = engine.page(&html, &url, 40, 10);
+            page.focus_next(true);
+            page.key(Key::Character("x".into()), Some("x"), Modifiers::empty());
+            page.key(Key::Enter, None, Modifiers::empty());
+            let mut got = None;
+            while let Ok(msg) = rx.try_recv() {
+                if let Msg::Navigate(o) = msg {
+                    got = Some(o.url.to_string());
+                }
+            }
+            assert_eq!(got, Some(format!("{action}?q=x")));
+        }
     }
 }

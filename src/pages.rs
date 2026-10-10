@@ -59,7 +59,7 @@ pub fn home() -> String {
         "New Tab",
         &format!(
             r#"<h1>Lineal</h1><div class=sub>A lightweight web browser for your terminal.</div>
-<form action="about:search"><input type=text name=q placeholder="Search the web or type a URL"><button>Search</button></form>
+<form action="https://lineal.invalid/search"><input type=text name=q placeholder="Search the web or type a URL"><button>Search</button></form>
 <div class=tiles>{tiles}</div>
 <div class=foot>Lineal {} · press F1 for keys</div>"#,
             env!("CARGO_PKG_VERSION")
@@ -107,9 +107,16 @@ pub enum About {
     Redirect(Url),
 }
 
-/// Resolves an `about:` URL. `about:search?q=…` goes to the search engine (or the URL typed).
+/// Internal pages live under `about:`. Forms can't post to `about:` URLs, so the start page's
+/// search box uses `https://lineal.invalid/search` instead (`.invalid` never resolves), which is
+/// intercepted here too.
+pub fn is_internal(url: &Url) -> bool {
+    url.scheme() == "about" || url.host_str() == Some("lineal.invalid")
+}
+
+/// Resolves an internal URL. `about:search?q=…` goes to the search engine (or the URL typed).
 pub fn about(url: &Url, search: &str) -> About {
-    if url.path() == "search" {
+    if url.path() == "search" || url.path() == "/search" {
         let q = url.query_pairs().find(|(k, _)| k == "q").map(|(_, v)| v.into_owned()).unwrap_or_default();
         return About::Redirect(crate::app::resolve_input(&q, search).url);
     }
