@@ -32,6 +32,9 @@ peniko = "0.6"
 kurbo = "0.13"
 keyboard-types = "0.7"
 bytes = "1"
+# Route ICU's "no segmentation model" warnings to the (silent) `log` crate instead of stderr,
+# which would scribble over the terminal UI.
+icu_provider = { version = "2", default-features = false, features = ["logging"] }
 
 [profile.release]
 opt-level = "s"

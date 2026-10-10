@@ -76,7 +76,8 @@ impl Grid {
 
 #[derive(Clone, Copy)]
 struct Text {
-    col: usize,
+    /// Glyph origin x (CSS px).
+    x: f64,
     ch: char,
     rgb: [u8; 3],
     attrs: u8,
@@ -243,21 +244,22 @@ impl PaintScene for TermScene<'_> {
         }
         for g in glyphs {
             let p = transform * Point::new(g.x as f64, g.y as f64);
-            if !clip.contains(p) {
+            // Test the middle of the glyph, not its origin: text often starts exactly on a clip edge.
+            if !clip.contains(Point::new(p.x + CELL_W / 2.0, p.y - CELL_H / 3.0)) {
                 continue;
             }
             // `p` is the glyph origin on the baseline.
-            let col = (p.x / CELL_W).round();
-            if col < 0.0 || col as usize >= self.cols || p.y < 0.0 || p.y > self.height + CELL_H {
+            if p.x < -CELL_W / 2.0 || p.x >= self.cols as f64 * CELL_W || p.y < 0.0 || p.y > self.height + CELL_H {
                 continue;
             }
             let ch = map.get(&g.id).copied().unwrap_or('\u{fffd}');
-            self.text.push(Text { col: col as usize, ch, rgb, attrs, baseline: p.y });
+            self.text.push(Text { x: p.x, ch, rgb, attrs, baseline: p.y });
         }
     }
 
-    fn draw_box_shadow(&mut self, transform: Affine, rect: Rect, brush: peniko::Color, radius: f64, std_dev: f64) {
-        self.raster.draw_box_shadow(transform, rect, brush, radius, std_dev);
+    fn draw_box_shadow(&mut self, _transform: Affine, _rect: Rect, _brush: peniko::Color, _radius: f64, _std_dev: f64) {
+        // Soft shadows are invisible at terminal resolution (and the CPU rasterizer paints
+        // them as solid blocks), so they're skipped.
     }
 }
 
@@ -412,9 +414,11 @@ impl Canvas<'_> {
         let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
         for y in y0..y1 {
             for p in &self.pixels[y * self.width + x0..y * self.width + x1] {
-                r += p.r as u32;
-                g += p.g as u32;
-                b += p.b as u32;
+                // Premultiplied: composite over white, so anything left transparent shows as paper.
+                let white = 255 - p.a as u32;
+                r += p.r as u32 + white;
+                g += p.g as u32 + white;
+                b += p.b as u32 + white;
                 n += 1;
             }
         }
@@ -444,19 +448,39 @@ fn compose(cols: usize, rows: usize, canvas: &Canvas, mut text: Vec<Text>, hline
         }
     }
     // Text goes on its line's row, over the background right behind the glyph's body.
+    let mut placed: Vec<(usize, f64, &Text)> = Vec::with_capacity(text.len());
     let mut line = 0;
     for t in &text {
         while line < line_rows.len() && t.baseline > line_rows[line].1 {
             line += 1;
         }
         let Some(&(_, _, row)) = line_rows.get(line) else { break };
-        if t.ch == ' ' || t.col >= cols {
+        placed.push((row, t.x, t));
+    }
+    // Left to right along each row, never putting a glyph on the column of the one before it:
+    // proportional fonts (fallbacks, form fields) and sub-pixel drift would otherwise overwrite.
+    placed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let mut last: Option<(usize, usize)> = None; // (row, col)
+    for (row, x, t) in placed {
+        // The small bias keeps glyphs sitting a hair before a half cell on the same side.
+        let mut col = (x / CELL_W + 0.1).round().max(0.0) as usize;
+        if let Some((r, c)) = last
+            && r == row
+            && col <= c
+        {
+            col = c + 1;
+        }
+        if col >= cols {
             continue;
         }
-        let (x0, x1) = ((t.col as f64 * CELL_W) as usize, ((t.col + 1) as f64 * CELL_W) as usize);
+        last = Some((row, col));
+        if t.ch == ' ' {
+            continue;
+        }
+        let (x0, x1) = ((col as f64 * CELL_W) as usize, ((col + 1) as f64 * CELL_W) as usize);
         let qx = (x1 - x0) / 4;
         let bg = canvas.avg(x0 + qx, t.baseline - 9.0, x1 - qx, t.baseline - 1.0);
-        cells[row * cols + t.col] = Cell { ch: t.ch, fg: t.rgb, bg, attrs: t.attrs };
+        cells[row * cols + col] = Cell { ch: t.ch, fg: t.rgb, bg, attrs: t.attrs };
     }
     let mut grid = Grid { cols, rows, cells, map };
     draw_lines(&mut grid, hlines, vlines);
