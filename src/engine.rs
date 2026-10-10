@@ -55,6 +55,8 @@ impl Engine {
         }
         ours.dedup();
         font_ctx.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+        #[cfg(target_os = "linux")]
+        crate::fonts::register_fallbacks(&mut font_ctx.collection);
         // Our font comes first for every generic family too, so text that doesn't go through the
         // page stylesheet (form fields use a built-in `sans-serif`) still lands on the grid.
         // System fonts stay behind it as fallbacks for scripts it doesn't cover.

@@ -3,6 +3,8 @@
 mod app;
 mod editor;
 mod engine;
+#[cfg(target_os = "linux")]
+mod fonts;
 mod net;
 mod pages;
 mod paint;

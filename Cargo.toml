@@ -20,7 +20,7 @@ url = "2.5"
 unicode-width = "0.2"
 encoding_rs = "0.8.42"
 # Rendering engine: Blitz = Stylo (Firefox's CSS engine) + Taffy layout + Parley text.
-blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts", "floats"] }
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["floats"] }
 blitz-html = "=0.3.0-beta.2"
 blitz-traits = "=0.3.0-beta.2"
 blitz-paint = { version = "=0.3.0-beta.2", default-features = false }
@@ -35,6 +35,14 @@ bytes = "1"
 # Route ICU's "no segmentation model" warnings to the (silent) `log` crate instead of stderr,
 # which would scribble over the terminal UI.
 icu_provider = { version = "2", default-features = false, features = ["logging"] }
+
+# System fonts (for scripts our bundled font lacks): native APIs on Windows, macOS and Android.
+# On Linux that would mean linking fontconfig (C), so `fonts.rs` finds fallback fonts itself.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["floats", "system-fonts"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+memmap2 = "0.9"
 
 [profile.release]
 opt-level = "s"

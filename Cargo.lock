@@ -1443,6 +1443,7 @@ dependencies = [
  "icu_provider",
  "keyboard-types",
  "kurbo",
+ "memmap2",
  "parley",
  "peniko",
  "ratatui",
