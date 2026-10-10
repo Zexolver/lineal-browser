@@ -77,7 +77,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.buffer_mut().set_string(0, 0, "Lineal: window too small", Style::default());
         return;
     }
-    let content = Rect { x: area.x, y: area.y + 2, width: area.width, height: area.height - 2 };
+    // The last column is the scrollbar's, like a browser's scrollbar sits beside the page.
+    let content = Rect { x: area.x, y: area.y + 2, width: area.width - 1, height: area.height - 2 };
     app.set_viewport(content.x, content.y, content.width as usize, content.height as usize);
 
     draw_tabs(f.buffer_mut(), app, Rect { height: 1, ..area });
@@ -208,13 +209,15 @@ fn blit(buf: &mut Buffer, grid: &Grid, area: Rect) {
 }
 
 fn draw_scrollbar(buf: &mut Buffer, app: &App, area: Rect) {
+    let track = Rect { x: area.right(), width: 1, ..area };
+    fill(buf, track, [240, 240, 244]);
     let Some((top, bottom)) = app.scroll_fraction() else { return };
     let h = area.height as f64;
     let (y0, y1) = ((top * h).floor() as u16, ((bottom * h).ceil() as u16).max((top * h).floor() as u16 + 1));
-    let x = area.right() - 1;
+    let x = track.x;
     for y in y0..y1.min(area.height) {
         let cell = &mut buf[(x, area.y + y)];
-        cell.set_symbol("▐").set_fg(rgb([150, 150, 160]));
+        cell.set_symbol("▐").set_fg(rgb([140, 140, 150]));
     }
 }
 

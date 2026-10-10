@@ -1,6 +1,5 @@
 //! Browser state: the current page, history, the address bar, and what keys and the mouse do.
 
-use std::io::Write;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -623,31 +622,6 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Copies to the system clipboard with an OSC 52 escape; works over SSH in most modern terminals.
-#[allow(dead_code)]
-pub fn copy(text: &str) {
-    let mut out = std::io::stdout();
-    let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
-    let _ = out.flush();
-}
-
-fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
-        for i in 0..4 {
-            if i <= chunk.len() {
-                s.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                s.push('=');
-            }
-        }
-    }
-    s
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,12 +636,5 @@ mod tests {
         assert_eq!(r("rust tui"), "https://lite.duckduckgo.com/lite/?q=rust+tui");
         assert_eq!(r("ratatui"), "https://lite.duckduckgo.com/lite/?q=ratatui");
         assert_eq!(r(""), "about:home");
-    }
-
-    #[test]
-    fn base64_encodes() {
-        assert_eq!(base64(b"Man"), "TWFu");
-        assert_eq!(base64(b"Ma"), "TWE=");
-        assert_eq!(base64(b"M"), "TQ==");
     }
 }

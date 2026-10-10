@@ -225,7 +225,9 @@ impl Page {
 
     /// (scroll position, viewport height, content height) in px, for the scroll indicator.
     pub fn scroll_info(&self) -> (f64, f64, f64) {
-        (self.doc.viewport_scroll().y, self.rows as f64 * CELL_H, self.content_height())
+        // Dropping thin gaps (see `RowMap`) means a screen often shows more than its pixel height.
+        let shown = if self.map.ranges.is_empty() { self.rows as f64 * CELL_H } else { self.map.end() };
+        (self.doc.viewport_scroll().y, shown, self.content_height())
     }
 
     pub fn scroll_by(&mut self, rows: f64) {

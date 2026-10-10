@@ -1,125 +1,97 @@
 # Lineal
 
-A lightweight, modern terminal web browser written in Rust.
+A lightweight web browser for the terminal that shows websites the way a real browser does.
 
-Lineal gives you real web browsing from a terminal: search, readable pages, working links and
-forms, history and find, in one small native binary (about 4 MB) that starts instantly and
-uses a few MB of RAM. It is built on [tokio](https://tokio.rs), [ratatui](https://ratatui.rs),
-[html5ever](https://github.com/servo/html5ever) (Servo's HTML parser) and
-[rustls](https://github.com/rustls/rustls).
+Lineal doesn't strip pages down to text like lynx or w3m. It runs a real CSS engine (Stylo, the
+one inside Firefox) and a real layout engine (Taffy: block, flexbox, grid, floats), then paints
+the result into terminal cells: page colors and backgrounds, columns and sidebars, boxes and
+borders, bold/italic/underlined text, all inside Firefox-style browser chrome (tab strip, back /
+forward / reload buttons, address bar). It is still one small native binary: about 9-11 MB, a few
+tens of MB of memory, no browser or Chromium underneath.
 
-```
- Hacker News
- [news.ycombinator.com]   Hacker News new | past | comments | ask | show | jobs | submit    login
+Built with [tokio](https://tokio.rs), [ratatui](https://ratatui.rs) and
+[Blitz](https://github.com/DioxusLabs/blitz) (Stylo + Taffy + Parley), plus rustls for HTTPS.
+Pure Rust apart from `ring`'s crypto.
 
- 1.   Cloudflare acquires Deno (deno.com)
-      839 points by ilreb 6 hours ago | hide | 463 comments
- 2.   Our $445M Series D (oxide.computer)
-      471 points by ahlCVA 6 hours ago | hide | 191 comments
-https://news.ycombinator.com/                                                     4%  ? help
-```
+> **Status: early alpha.** No JavaScript yet, images show as placeholders, one tab.
 
 ## Features
 
-- **Spec-compliant HTML parsing** (html5ever), charset detection, gzip/brotli/deflate, HTTP/2, cookies.
-- **Text layout engine** built for terminals: wrapping, headings, lists, quotes, code blocks,
-  real column-based **tables** (Wikipedia infoboxes, Hacker News), `<noscript>` content.
-- **Knows what pages hide**: applies `display:none`/`visibility:hidden` rules from inline and
-  external stylesheets (with `@media` evaluation), the `hidden` attribute and screen-reader-only classes,
-  so you don't see collapsed menus, modals and duplicated mobile markup.
-- **Forms**: text fields, passwords, checkboxes, radio buttons, selects, GET and POST submission.
-- **Keyboard first, mouse friendly**: Tab between links, vimium-style link hints (`f`), vim keys,
-  click links and fields, scroll with the wheel.
-- History with instant back/forward (pages are cached), find in page, view source, fragment links,
-  `<meta refresh>`, downloads to `~/Downloads`, local files and directory listings.
-- Search from the address bar (DuckDuckGo Lite by default; configurable).
-- Copy URLs to your clipboard over OSC 52 (works over SSH).
-- `--dump` mode prints any page as text with numbered links, for scripts and pipes.
-- Respects `NO_COLOR` and uses your terminal's own color palette.
+- Real CSS: colors, backgrounds, gradients, flexbox, grid, floats, tables, `@media` queries
+- Firefox-like chrome: tab strip, ← → ↻ buttons, address bar that searches or opens URLs
+- Mouse: click links, buttons and fields, hover to see where links go, wheel scrolling
+- Keyboard: Tab through links and fields (highlighted), Enter to follow, Firefox shortcuts
+- Forms: type into text fields, submit with Enter or buttons, GET and POST
+- History with instant back/forward, fragment links, downloads to `~/Downloads`
+- `--dump` renders any page as text; `--dump-html` exports the colored rendering as HTML
+- Fully static Linux binaries (no fontconfig, no OpenSSL)
 
 ## Install
 
-Download a build for your platform from the [releases](https://github.com/Zexolver/lineal-browser/releases),
-or build from source with a recent stable Rust:
+Download a build from the [releases](https://github.com/Zexolver/lineal-browser/releases), or:
 
 ```sh
 cargo install --git https://github.com/Zexolver/lineal-browser
-# or
-git clone https://github.com/Zexolver/lineal-browser && cd lineal-browser && cargo build --release
 ```
 
-Release builds are produced by CI for:
-
-| OS      | Architectures                                   | Notes                     |
-|---------|-------------------------------------------------|---------------------------|
-| Linux   | x86_64, aarch64, armv7, riscv64, i686           | static (musl), no deps    |
-| Windows | x86_64, aarch64                                 | Windows Terminal recommended |
-| macOS   | x86_64 (Intel), aarch64 (Apple silicon)         |                           |
-
-Android via Termux is not officially supported yet, but `cargo install` inside Termux should work.
+Builds are made for Linux (x86_64, aarch64, armv7, riscv64, i686; static musl), Windows (x86_64,
+aarch64) and macOS (Intel, Apple silicon). A terminal with 24-bit color is recommended (almost all
+modern ones: Windows Terminal, kitty, WezTerm, foot, GNOME Terminal, Konsole, iTerm2, Alacritty…).
 
 ## Usage
 
 ```sh
-lineal                          # start page
-lineal example.org              # open a site (https:// is assumed)
-lineal rust terminal ui         # anything that isn't a URL is a web search
-lineal ./notes.html             # local files and directories
-lineal --dump news.ycombinator.com | less    # render as text and exit
+lineal                       # start page
+lineal example.org           # a site (https:// is assumed)
+lineal rust terminal ui      # anything that isn't a URL is a web search
+lineal ./page.html           # local files
+lineal --dump news.ycombinator.com
 ```
 
-| Key                              | Action                                   |
-|----------------------------------|------------------------------------------|
-| `o` / `O`                        | open URL or search / edit current URL    |
-| `Tab` / `Shift-Tab`, `Enter`     | move between links and fields, activate  |
-| `f`                              | link hints: type the label to follow     |
-| `j` `k` `↓` `↑`, `Space` `b`, `Ctrl-d` `Ctrl-u` | scroll                    |
-| `g` / `G`                        | top / bottom                             |
-| `H` / `L`, `Backspace`, `Alt-←` / `Alt-→` | back / forward                  |
-| `/`, `n` / `N`                   | find in page, next / previous match      |
-| `r`                              | reload                                   |
-| `y` / `Y`                        | copy page URL / focused link URL         |
-| `\`                              | toggle page source                       |
-| `?`                              | help                                     |
-| `q`                              | quit                                     |
+| Key                         | Action                                     |
+|-----------------------------|--------------------------------------------|
+| Ctrl-L, Alt-D, F6           | edit the address (URL or search)           |
+| Tab / Shift-Tab, Enter      | move between links and fields, activate    |
+| ↑ ↓, PgUp PgDn, Space       | scroll                                     |
+| Home / End                  | top / bottom                               |
+| Alt-← / Alt-→, Backspace    | back / forward                             |
+| F5, Ctrl-R                  | reload                                     |
+| Esc                         | stop loading, leave a text field           |
+| F1                          | help                                       |
+| Ctrl-Q, Ctrl-C              | quit                                       |
 
-Environment variables: `LINEAL_SEARCH` (search URL template with `%s`, e.g.
-`https://search.marginalia.nu/search?query=%s`), `LINEAL_HOME` (start page), `NO_COLOR`.
+Environment: `LINEAL_SEARCH` (search URL with `%s`), `LINEAL_HOME` (start page).
 
-## How it works, and why this design
+## How it works
 
 ```
- URL bar ─► net.rs (reqwest + rustls/ring, tokio) ─► dom.rs (html5ever DOM, forms, hidden set)
-                                    │                         ▲
-                                    └─► css.rs: external sheets, "what's hidden" only
- dom ─► layout.rs (blocks, inline flow, wrapping, tables) ─► lines of styled spans ─► ui.rs (ratatui)
+ address bar ─► net.rs (reqwest + rustls, tokio) ─► engine.rs: Blitz document
+                                                     (html5ever → Stylo CSS → Taffy layout)
+ Blitz's painter (blitz-paint) ─► paint.rs: a PaintScene for terminals ─► cells ─► ui.rs (ratatui)
 ```
 
-The goal is a browser that is **light, fast, portable and as pure-Rust as possible**. Options considered:
+`paint.rs` receives the same drawing commands a GPU renderer would and splits them up:
 
-- **Gosub engine**: interesting, but pre-alpha, with a large dependency surface and a graphical
-  pipeline we would mostly throw away in a terminal.
-- **Servo / Blitz (Stylo + Taffy)**: a full CSS engine. Correct, but it lays out in pixels,
-  is heavy to build and run, and a terminal can't show most of what it computes.
-- **Our own text-mode engine on html5ever** ← chosen. We parse with a browser-grade parser, then lay
-  out *for a character grid*: block/inline flow, word wrap and tables computed in columns, not pixels.
-  CSS is used only for what matters in a terminal (is this element hidden?). This keeps the binary
-  around 4 MB with no C dependencies apart from `ring`'s crypto.
+- **text runs** become real terminal characters in their CSS color (glyph ids are mapped back to
+  characters through each font's character map);
+- **thin lines** (borders, underlines, carets) become underlines or `▔ ▁ ▏ ▕` line characters;
+- **everything else** (backgrounds, rounded boxes, gradients) is rasterized on the CPU and averaged
+  into cell colors, using `▀` half blocks where a cell's top and bottom differ.
 
-**JavaScript** is the obvious next question. A JS engine alone is not enough; sites need a DOM,
-events, timers and `fetch`, which is most of the work. The plan is an optional `js` cargo feature
-using [Boa](https://boajs.dev) (pure Rust) with a minimal DOM binding over the same tree, so the
-default build stays small and fast, and you can opt into JS when you need it.
+To make pages fit the character grid, Lineal's built-in stylesheet gives all text one monospace
+font (bundled DejaVu Sans Mono) at one size and line height. Then every line of text gets its own
+terminal row, and gaps between lines only get rows when they're at least about half a row tall.
+Without this, pixel spacing on real pages would produce random blank lines.
 
 ## Roadmap
 
-- [ ] Optional JavaScript (Boa) behind a cargo feature, with a small DOM API
-- [ ] Tabs, bookmarks, persistent history and cookies
-- [ ] Inline images on terminals that support them (kitty, sixel, iTerm2)
-- [ ] Reader mode (extract the main article)
-- [ ] Config file for keys, colors and search engines
-- [ ] Termux / Android support
+- [ ] Images: half-block pixels everywhere, real images on kitty/sixel/iTerm2 terminals (can be turned off)
+- [ ] JavaScript via Boa (pure Rust), as an optional feature
+- [ ] Tabs, find in page, bookmarks
+- [ ] Show any script even without its fonts installed
+- [ ] Termux / Android
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later (see [LICENSE](LICENSE)). The bundled DejaVu Sans Mono font is under the Bitstream
+Vera license with public-domain DejaVu changes (see `assets/fonts/LICENSE-DejaVu.txt`).
